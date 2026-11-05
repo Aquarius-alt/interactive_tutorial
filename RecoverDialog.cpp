@@ -2,6 +2,7 @@
 #include "TextField.h"
 #include "Text.h"
 #include "UserStore.h"
+#include "Localization.h"
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -62,7 +63,7 @@ namespace {
     }
 
     float TextW(const std::string& s, float sc) {
-        return float(s.size()) * float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) * sc;
+        return Utf8TextWidth(s, static_cast<int>(8.f * sc));
     }
 
     // самый крупный масштаб (2 .. 1), при котором строка влезает в avail
@@ -75,20 +76,16 @@ namespace {
     // надпись по координатам x, y (левый верхний угол) с мягким свечением
     void Txt(SDL_Renderer* r, const std::string& s, float x, float y, float sc,
              Uint8 R, Uint8 G, Uint8 B, Uint8 A = 255, bool glow = true) {
-        const float tx = x / sc, ty = y / sc;
-        SDL_SetRenderScale(r, sc, sc);
-        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+        const int fontHeight = static_cast<int>(8.f * sc);
         if (glow) {
-            SDL_SetRenderDrawColor(r, R, G, B, Uint8(A * 45 / 255));
-            const float o = 0.6f;
-            SDL_RenderDebugText(r, tx - o, ty, s.c_str());
-            SDL_RenderDebugText(r, tx + o, ty, s.c_str());
-            SDL_RenderDebugText(r, tx, ty - o, s.c_str());
-            SDL_RenderDebugText(r, tx, ty + o, s.c_str());
+            const Uint8 glowAlpha = static_cast<Uint8>(A * 45 / 255);
+            const float offset = 0.6f * sc;
+            DrawUtf8Text(r, s, x - offset, y, fontHeight, R, G, B, glowAlpha);
+            DrawUtf8Text(r, s, x + offset, y, fontHeight, R, G, B, glowAlpha);
+            DrawUtf8Text(r, s, x, y - offset, fontHeight, R, G, B, glowAlpha);
+            DrawUtf8Text(r, s, x, y + offset, fontHeight, R, G, B, glowAlpha);
         }
-        SDL_SetRenderDrawColor(r, R, G, B, A);
-        SDL_RenderDebugText(r, tx, ty, s.c_str());
-        SDL_SetRenderScale(r, 1.0f, 1.0f);
+        DrawUtf8Text(r, s, x, y, fontHeight, R, G, B, A);
     }
 
     // рамка в 2 пикселя с неоновым свечением снаружи
@@ -187,7 +184,7 @@ namespace {
 
         // 4) "624 / 1440 FILES" под полосой справа
         char files[40];
-        std::snprintf(files, sizeof files, "%d / %d FILES", int(p * kTotalFiles), kTotalFiles);
+        std::snprintf(files, sizeof files, "%d / %d %s", int(p * kTotalFiles), kTotalFiles, UiText("FILES", "ФАЙЛОВ"));
         Txt(r, files, x + W - TextW(files, 1.f) - 2.f, y + kBarH + 8.f, 1.f, R, G, B, 210, false);
     }
 
@@ -255,7 +252,7 @@ void Recover_Open(SDL_Window* window) {
     if (g_worker.joinable()) g_worker.join();
     WipeFound();
     WipeField();
-    g_field.placeholder = "KEYWORD";
+    g_field.placeholder = UiText("KEYWORD", "КЛЮЧЕВОЕ СЛОВО");
     g_field.password = false;
     g_field.focused = true;
     g_field.maxLen = 32;
@@ -306,16 +303,22 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     NeonRect(r, panel, GR, GG, GB, 1.f);
 
     // заголовок
-    const char* title = "FORGOT PASSWORD";
-    if (g_phase == Phase::Result) title = (cnt > 1) ? "ACCOUNTS FOUND" : "ACCOUNT FOUND";
-    DrawCenteredText(r, title, w, h, W >= 400.f ? 3.0f : 2.0f, py + 34.f - h * 0.5f, GR, GG, GB);
+    g_field.placeholder = UiText("KEYWORD", "КЛЮЧЕВОЕ СЛОВО");
+    const char* title = UiText("FORGOT PASSWORD", "ВОССТАНОВЛЕНИЕ ПАРОЛЯ");
+    if (g_phase == Phase::Result) title = (cnt > 1) ? UiText("ACCOUNTS FOUND", "АККАУНТЫ НАЙДЕНЫ") : UiText("ACCOUNT FOUND", "АККАУНТ НАЙДЕН");
+    float titleScale = W >= 400.f ? 3.0f : 2.0f;
+    // Russian title is longer than the English one; reduce its pixel size only
+    // when needed so it stays centered inside the dialog.
+    while (titleScale > 1.0f && TextW(title, titleScale) > W - 40.f)
+        titleScale -= 0.5f;
+    DrawCenteredText(r, title, w, h, titleScale, py + 34.f - h * 0.5f, GR, GG, GB);
 
     const float bx = px + 40.f, bw = W - 80.f;    // общая «колонка» контента
     const float by = py + H - 24.f - 40.f;        // строка кнопок
 
     switch (g_phase) {
     case Phase::Input: {
-        const std::string sub = "ENTER YOUR KEYWORD";
+        const std::string sub = UiText("ENTER YOUR KEYWORD", "ВВЕДИТЕ КЛЮЧЕВОЕ СЛОВО");
         Txt(r, sub, px + (W - TextW(sub, 2.f)) * 0.5f, py + 68.f, 2.f, GR, GG, GB, 170);
 
         // поле ввода
@@ -339,15 +342,16 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             Txt(r, "_", fr.x + 12.f + TextW(shown_s, 2.f), ty, 2.f, GR, GG, GB, 255, false);
 
         if (!g_err.empty()) {
-            const float sc = FitScale(g_err, W - 40.f);
-            Txt(r, g_err, px + (W - TextW(g_err, sc)) * 0.5f, py + 150.f, sc, 255, 90, 90);
+            const std::string shownError = UiMessage(g_err);
+            const float sc = FitScale(shownError, W - 40.f);
+            Txt(r, shownError, px + (W - TextW(shownError, sc)) * 0.5f, py + 150.f, sc, 255, 90, 90);
         }
 
         const float half = (bw - 16.f) * 0.5f;
         g_a = { bx, by, half, 40.f, g_a.hover };
         g_b = { bx + half + 16.f, by, half, 40.f, g_b.hover };
-        DrawBtn(r, g_a, "CANCEL");
-        DrawBtn(r, g_b, "FIND");
+        DrawBtn(r, g_a, UiText("CANCEL", "ОТМЕНА"));
+        DrawBtn(r, g_b, UiText("FIND", "НАЙТИ"));
         break;
     }
     case Phase::Scan:
@@ -358,10 +362,10 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         std::string left;
         if (!hold) {
             const int dots = int(SDL_GetTicks() / 350) % 3 + 1;
-            left = "SCANNING " + std::string(size_t(dots), '.');
+            left = std::string(UiText("SCANNING ", "ПОИСК ")) + std::string(size_t(dots), '.');
         }
-        else if (miss) { R = 255; G = 70;  B = 80;  left = "NOT FOUND"; }
-        else           { R = GR;  G = GG;  B = GB;  left = "FOUND"; }
+        else if (miss) { R = 255; G = 70;  B = 80;  left = UiText("NOT FOUND", "НЕ НАЙДЕНО"); }
+        else           { R = GR;  G = GG;  B = GB;  left = UiText("FOUND", "НАЙДЕНО"); }
 
         DrawStrip(r, px + 30.f, py + 98.f, W - 60.f, left, g_p, R, G, B, !hold);
         break;
@@ -373,17 +377,17 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             const RecoveredAccount& a = g_found[i];
             const float y0 = py + 66.f + i * 76.f;
 
-            Txt(r, "LOGIN", tx, y0, 1.f, GR, GG, GB, 150, false);
+            Txt(r, UiText("LOGIN", "ЛОГИН"), tx, y0, 1.f, GR, GG, GB, 150, false);
             const float s1 = FitScale(a.login, avail);
             Txt(r, a.login, tx, y0 + 12.f, s1, GR, GG, GB);
 
-            Txt(r, "PASSWORD", tx, y0 + 36.f, 1.f, GR, GG, GB, 150, false);
+            Txt(r, UiText("PASSWORD", "ПАРОЛЬ"), tx, y0 + 36.f, 1.f, GR, GG, GB, 150, false);
             if (a.hasPassword) {
                 const float s2 = FitScale(a.password, avail);
                 Txt(r, a.password, tx, y0 + 48.f, s2, GR, GG, GB);
             }
             else {
-                Txt(r, "NOT AVAILABLE", tx, y0 + 48.f, 2.f, GR, GG, GB, 110);
+                Txt(r, UiText("NOT AVAILABLE", "НЕДОСТУПНО"), tx, y0 + 48.f, 2.f, GR, GG, GB, 110);
             }
 
             if (i + 1 < shown || more) {                 // разделитель
@@ -394,12 +398,12 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         }
         if (more) {
             char buf[40];
-            std::snprintf(buf, sizeof buf, "+ %d MORE", int(cnt - shown));
+            std::snprintf(buf, sizeof buf, UiRussianFlag() ? "+ ЕЩЁ %d" : "+ %d MORE", int(cnt - shown));
             Txt(r, buf, tx, py + 66.f + shown * 76.f + 4.f, 1.f, GR, GG, GB, 150, false);
         }
 
         g_b = { bx, by, bw, 40.f, g_b.hover };
-        DrawBtn(r, g_b, "CLOSE");
+        DrawBtn(r, g_b, UiText("CLOSE", "ЗАКРЫТЬ"));
         break;
     }
     default: break;

@@ -1,4 +1,5 @@
 #include "TextButton.h"
+#include "Text.h"
 #include <vector>
 #include <cmath>
 #include <cstring>
@@ -69,18 +70,13 @@ void TextButton_Draw(SDL_Renderer* r, TextButton& b) {
     if (b.hovered) SDL_RenderTexture(r, b.glow, nullptr, &dst);
     SDL_RenderTexture(r, b.core, nullptr, &dst);
 
-    // подпись по центру кнопки
-    const float cs = float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE);
-    const float textW = std::strlen(b.label) * cs * kTextScale;
-    const float textH = cs * kTextScale;
-    const float tx = (b.x + (b.w - textW) * 0.5f) / kTextScale;
-    const float ty = (b.y + (b.h - textH) * 0.5f) / kTextScale;
-
-    SDL_SetRenderScale(r, kTextScale, kTextScale);
-    if (b.hovered) SDL_SetRenderDrawColor(r, 200, 240, 255, 255);   // при наведении текст светлее
-    else           SDL_SetRenderDrawColor(r, kR, kG, kB, 255);
-    SDL_RenderDebugText(r, tx, ty, b.label);
-    SDL_SetRenderScale(r, 1.0f, 1.0f);
+    // Unicode-подпись по центру кнопки (в том числе кириллица).
+    const std::string label = b.label ? b.label : "";
+    const int fontHeight = static_cast<int>(8.f * kTextScale);
+    const float textW = Utf8TextWidth(label, fontHeight);
+    DrawUtf8Text(r, label, b.x + (b.w - textW) * 0.5f,
+        b.y + (b.h - fontHeight) * 0.5f, fontHeight,
+        b.hovered ? 200 : kR, b.hovered ? 240 : kG, 255, 255);
 }
 
 static bool Inside(const TextButton& b, float mx, float my) {

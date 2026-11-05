@@ -5,6 +5,7 @@
 #include "ConfirmDialog.h"
 #include "SaveOverlay.h"
 #include "UserStore.h"
+#include "Localization.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -19,13 +20,13 @@ namespace {
     void EnsureInit() {
         if (g_init) return;
         g_init = true;
-        const char* ph[kFields] = { "LOGIN", "PASSWORD", "REPEAT PASSWORD", "KEYWORD" };
+        const char* ph[kFields] = { UiText("LOGIN", "ЛОГИН"), UiText("PASSWORD", "ПАРОЛЬ"), UiText("REPEAT PASSWORD", "ПОВТОРИТЕ ПАРОЛЬ"), UiText("KEYWORD", "КЛЮЧЕВОЕ СЛОВО") };
         for (int i = 0; i < kFields; ++i) {
             g_f[i].placeholder = ph[i];
             g_f[i].password = (i == 1 || i == 2);
         }
-        g_ok.label = "SIGN UP";
-        g_back.label = "BACK";
+        g_ok.label = UiText("SIGN UP", "СОЗДАТЬ");
+        g_back.label = UiText("BACK", "НАЗАД");
     }
 
     void Focus(int i) {
@@ -139,7 +140,11 @@ void SignUp_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         + barGap + titleGap + fieldH;
     const float top = std::max(60.f, (h - blockH) * 0.5f);
 
-    DrawCenteredText(r, "SIGN UP", w, h, 3.0f, top + titleH * 0.5f - h * 0.5f);
+    const char* ph[kFields] = { UiText("LOGIN", "ЛОГИН"), UiText("PASSWORD", "ПАРОЛЬ"), UiText("REPEAT PASSWORD", "ПОВТОРИТЕ ПАРОЛЬ"), UiText("KEYWORD", "КЛЮЧЕВОЕ СЛОВО") };
+    for (int i = 0; i < kFields; ++i) g_f[i].placeholder = ph[i];
+    g_ok.label = UiText("SIGN UP", "СОЗДАТЬ");
+    g_back.label = UiText("BACK", "НАЗАД");
+    DrawCenteredText(r, UiText("SIGN UP", "РЕГИСТРАЦИЯ"), w, h, 3.0f, top + titleH * 0.5f - h * 0.5f);
 
     const float x = (w - fieldW) * 0.5f;
     float y = top + titleH + titleGap;
@@ -164,8 +169,10 @@ void SignUp_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     nd[ndCount++] = TextButton_Rect(g_back);
     nd[ndCount++] = TextButton_Rect(g_ok);
 
-    if (!g_err.empty())
-        DrawCenteredText(r, g_err.c_str(), w, h, 2.0f, y + g_ok.h + 24.f - h * 0.5f, 255, 90, 90);
+    if (!g_err.empty()) {
+        const std::string shownError = UiMessage(g_err);
+        DrawCenteredText(r, shownError.c_str(), w, h, 2.0f, y + g_ok.h + 24.f - h * 0.5f, 255, 90, 90);
+    }
 
     // окно "ARE YOU SURE?" рисуется поверх всего остального
     Confirm_Draw(r, w, h, nd, ndCount);

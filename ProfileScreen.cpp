@@ -2,6 +2,7 @@
 #include "Avatar.h"
 #include "TextButton.h"
 #include "Text.h"
+#include "Localization.h"
 #include <algorithm>
 #include <atomic>
 #include <mutex>
@@ -32,7 +33,9 @@ namespace {
 
     void ChooseFile() {
         if (g_dialogOpen.exchange(true)) return;   // диалог уже открыт
-        static const SDL_DialogFileFilter filters[] = { { "Images (PNG, BMP)", "png;bmp" } };
+        static const SDL_DialogFileFilter filtersEn[] = { { "Images (PNG, BMP)", "png;bmp" } };
+        static const SDL_DialogFileFilter filtersRu[] = { { "Изображения (PNG, BMP)", "png;bmp" } };
+        const SDL_DialogFileFilter* filters = UiRussianFlag() ? filtersRu : filtersEn;
         SDL_ShowOpenFileDialog(OnFileChosen, nullptr, g_window, filters, 1, nullptr, false);
     }
 }
@@ -68,9 +71,10 @@ void Profile_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     // заголовок у самой рамки, как "by Aquarius" на главном экране
     const float titleScale = (w >= 520) ? 3.0f : 2.0f;
     const float titleCy = 5.f + float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) * titleScale * 0.5f;
-    DrawCenteredText(r, "PROFILE", w, h, titleScale, titleCy - h * 0.5f);
+    DrawCenteredText(r, UiText("PROFILE", "ПРОФИЛЬ"), w, h, titleScale, titleCy - h * 0.5f);
 
     // BACK слева сверху
+    g_back.label = UiText("BACK", "НАЗАД");
     g_back.x = 20.f;
     g_back.y = 16.f + 20.f;
     TextButton_Draw(r, g_back);
@@ -92,14 +96,17 @@ void Profile_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     const float nameCy = top + d + gap1 + nameH * 0.5f;
     DrawCenteredText(r, g_login.c_str(), w, h, nameScale, nameCy - h * 0.5f);
 
-    g_change.label = Avatar_Has() ? "CHANGE AVATAR" : "ADD AVATAR";
+    g_change.w = UiRussianFlag() ? 280.f : 240.f;
+    g_change.label = Avatar_Has() ? UiText("CHANGE AVATAR", "СМЕНИТЬ АВАТАР") : UiText("ADD AVATAR", "ДОБАВИТЬ АВАТАР");
     g_change.x = cx - g_change.w * 0.5f;
     g_change.y = top + d + gap1 + nameH + gap2;
     TextButton_Draw(r, g_change);
     nd[ndCount++] = TextButton_Rect(g_change);
 
-    if (!g_err.empty())
-        DrawCenteredText(r, g_err.c_str(), w, h, 2.0f, g_change.y + btnH + 24.f - h * 0.5f, 255, 90, 90);
+    if (!g_err.empty()) {
+        const std::string shownError = UiMessage(g_err);
+        DrawCenteredText(r, shownError.c_str(), w, h, 2.0f, g_change.y + btnH + 24.f - h * 0.5f, 255, 90, 90);
+    }
 }
 
 ProfileResult Profile_Handle(const SDL_Event& e) {

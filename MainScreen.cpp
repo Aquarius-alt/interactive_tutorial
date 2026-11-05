@@ -2,6 +2,9 @@
 #include "Avatar.h"
 #include "TextButton.h"
 #include "Text.h"
+#include "RepoStore.h"
+#include "Localization.h"
+#include <vector>
 #include <algorithm>
 #include <cmath>
 
@@ -24,9 +27,132 @@ namespace {
     TextButton g_profile{ 0, 0, kMenuW - 20.f, kItemH, "PROFILE" };
     TextButton g_logout{ 0, 0, kMenuW - 20.f, kItemH, "LOGOUT" };
 
-    // кнопка "+": рамку рисует TextButton, сам плюс рисуется отдельно
-    const float kPlusX = 40.f, kPlusY = 128.f;
-    TextButton g_plus{ 0, 0, 80, 80, "" };
+    // ---------- сетка репозиториев ----------
+    // Карточки идут по порядку (слева направо, сверху вниз), "+" стоит сразу после последней.
+    // Колонок и видимых рядов столько, сколько влезает в окно; лишние ряды листаются колесом
+    // или ползунком справа. Размер карточки фиксированный, как у "+".
+    const float kCardW = 150.f, kCardH = 176.f, kGap = 16.f;
+    const float kGridX = 20.f, kGridY = 84.f, kBarGutter = 18.f;
+    const float kCardPad = 16.f;
+
+    struct RepoCard {
+        std::string  name;
+        std::string  dir;                // папка репозитория на диске
+        SDL_Surface* img = nullptr;      // квадрат 128x128 (или nullptr, если обложки нет)
+        SDL_Texture* tex = nullptr;
+    };
+    std::vector<RepoCard> g_repos;
+    SDL_Renderer*         g_texOwner = nullptr;
+    TextButton            g_card{ 0, 0, kCardW, kCardH, "" };     // рамка карточки (рисуется для каждой)
+
+    // ---------- меню карточки (ЛКМ по репозиторию): DELETE, EDIT, OPEN ----------
+    const float kCmItemW = 120.f, kCmItemH = 34.f, kCmGap = 8.f, kCmPad = 8.f;
+    int         g_cmIdx = -1;                    // у какой карточки открыто меню (-1 = закрыто)
+    float       g_cmX = 0.f, g_cmY = 0.f;        // куда кликнули: левый верхний угол меню
+    bool        g_cmLaid = false;                // true после отрисовки (до неё позиции пунктов неверны)
+    SDL_FRect   g_cmRect = { 0, 0, 0, 0 };
+    TextButton  g_cmDelete{ 0, 0, kCmItemW, kCmItemH, "DELETE" };
+    TextButton  g_cmEdit{ 0, 0, kCmItemW, kCmItemH, "EDIT" };
+    TextButton  g_cmOpen{ 0, 0, kCmItemW, kCmItemH, "OPEN" };
+    std::string g_chosenDir;                     // папка для Main_RepoDir()
+
+    struct VisCard { SDL_FRect rc; int slot; };  // карточки, нарисованные в этом кадре (для кликов)
+    std::vector<VisCard> g_vis;
+
+    void CloseCardMenu() { g_cmIdx = -1; g_cmLaid = false; g_cmRect = { 0, 0, 0, 0 }; }
+
+    TextButton g_plus{ 0, 0, kCardW, kCardH, "" };               // "+": рамку рисует TextButton, сам плюс отдельно
+    bool       g_plusVisible = false;                            // "+" сейчас на экране (не уехал при прокрутке)
+    int        g_scrollRow = 0;
+    int        g_cols = 1, g_visRows = 1;
+    SDL_FRect  g_gridRect = { 0, 0, 0, 0 };
+    SDL_FRect  g_track = { 0, 0, 0, 0 };
+    SDL_FRect  g_thumb = { 0, 0, 0, 0 };
+    bool       g_hasBar = false, g_drag = false;
+    float      g_dragOff = 0.f, g_mx = -1.f, g_my = -1.f;
+
+    int  TotalRows() { return (int(g_repos.size()) + 1 + g_cols - 1) / g_cols; }   // +1 = место под "+"
+    int  MaxScroll() { return std::max(0, TotalRows() - g_visRows); }
+    void ClampScroll() { g_scrollRow = std::clamp(g_scrollRow, 0, MaxScroll()); }
+
+    bool InsideF(const SDL_FRect& f, float mx, float my) {
+        return mx >= f.x && mx <= f.x + f.w && my >= f.y && my <= f.y + f.h;
+    }
+
+    void ScrollFromMouseY(float my) {
+        const float travel = g_track.h - g_thumb.h;
+        if (travel <= 0.f) return;
+        const float t = std::clamp((my - g_dragOff - g_track.y) / travel, 0.f, 1.f);
+        g_scrollRow = int(std::lround(t * float(MaxScroll())));
+        ClampScroll();
+    }
+
+    void FreeRepos() {
+        for (RepoCard& c : g_repos) {
+            if (c.tex) SDL_DestroyTexture(c.tex);
+            if (c.img) SDL_DestroySurface(c.img);
+        }
+        g_repos.clear();
+    }
+
+    // картинка -> центральный квадрат 128x128 RGBA32; nullptr при ошибке
+    SDL_Surface* MakeCover(const std::string& path) {
+        const int kSide = 128;
+        SDL_Surface* src = SDL_LoadSurface(path.c_str());   // PNG или BMP
+        if (!src) return nullptr;
+        SDL_Surface* cur = SDL_ConvertSurface(src, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(src);
+        if (!cur) return nullptr;
+
+        const int side = std::min(cur->w, cur->h);
+        if (side < 1) { SDL_DestroySurface(cur); return nullptr; }
+        if (cur->w != cur->h) {                              // обрезка по центру до квадрата
+            SDL_Surface* sq = SDL_CreateSurface(side, side, SDL_PIXELFORMAT_RGBA32);
+            if (!sq) { SDL_DestroySurface(cur); return nullptr; }
+            const SDL_Rect rc = { (cur->w - side) / 2, (cur->h - side) / 2, side, side };
+            SDL_SetSurfaceBlendMode(cur, SDL_BLENDMODE_NONE);
+            SDL_BlitSurface(cur, &rc, sq, nullptr);
+            SDL_DestroySurface(cur);
+            cur = sq;
+        }
+        while (cur->w > kSide) {                             // сжатие по шагам вдвое
+            const int next = std::max(kSide, cur->w / 2);
+            SDL_Surface* sc = SDL_ScaleSurface(cur, next, next, SDL_SCALEMODE_LINEAR);
+            SDL_DestroySurface(cur);
+            if (!sc) return nullptr;
+            cur = sc;
+        }
+        if (cur->w < kSide) {
+            SDL_Surface* sc = SDL_ScaleSurface(cur, kSide, kSide, SDL_SCALEMODE_LINEAR);
+            SDL_DestroySurface(cur);
+            if (!sc) return nullptr;
+            cur = sc;
+        }
+        return cur;
+    }
+
+    void LoadRepos() {
+        FreeRepos();
+        for (const RepoInfo& ri : RepoStore_List(g_login)) {
+            RepoCard c;
+            c.name = ri.name;
+            c.dir = ri.dir;
+            if (!ri.coverPath.empty()) c.img = MakeCover(ri.coverPath);
+            g_repos.push_back(std::move(c));
+        }
+        g_scrollRow = 0;
+        g_drag = false;
+        CloseCardMenu();
+    }
+
+    void EnsureTextures(SDL_Renderer* r) {
+        if (g_texOwner != r) {                               // новый рендерер: текстуры пересоздать
+            for (RepoCard& c : g_repos) if (c.tex) { SDL_DestroyTexture(c.tex); c.tex = nullptr; }
+            g_texOwner = r;
+        }
+        for (RepoCard& c : g_repos)
+            if (c.img && !c.tex) c.tex = SDL_CreateTextureFromSurface(r, c.img);
+    }
 
     // плавающее окно "+": две квадратные кнопки с подписями под ними
     const float kAddPad = 24.f;        // отступ кнопок от краёв окна
@@ -53,24 +179,33 @@ namespace {
     }
 
     // надпись от левого края; при нехватке места мельче, затем с обрезкой
-    void DrawLeftText(SDL_Renderer* r, std::string s, float x, float cy, float maxW) {
-        const float cs = float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE);
-        float scale = 2.0f;
-        if (s.size() * cs * scale > maxW) scale = 1.0f;
-        const size_t fit = size_t(std::max(1.f, maxW / (cs * scale)));
-        if (s.size() > fit) s = s.substr(0, fit > 2 ? fit - 2 : fit) + (fit > 2 ? ".." : "");
+    size_t Utf8ByteAt(const std::string& value, size_t charIndex) {
+        size_t pos = 0;
+        while (pos < value.size() && charIndex) {
+            const unsigned char c = static_cast<unsigned char>(value[pos]);
+            pos += c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4));
+            --charIndex;
+        }
+        return std::min(pos, value.size());
+    }
 
-        SDL_SetRenderScale(r, scale, scale);
-        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, kR, kG, kB, 45);                // мягкое свечение, как у остальных надписей
-        const float tx = x / scale, ty = (cy - cs * scale * 0.5f) / scale, o = 0.6f;
-        SDL_RenderDebugText(r, tx - o, ty, s.c_str());
-        SDL_RenderDebugText(r, tx + o, ty, s.c_str());
-        SDL_RenderDebugText(r, tx, ty - o, s.c_str());
-        SDL_RenderDebugText(r, tx, ty + o, s.c_str());
-        SDL_SetRenderDrawColor(r, kR, kG, kB, 255);
-        SDL_RenderDebugText(r, tx, ty, s.c_str());
-        SDL_SetRenderScale(r, 1.0f, 1.0f);
+    void DrawLeftText(SDL_Renderer* r, std::string s, float x, float cy, float maxW) {
+        int font = 16;
+        size_t fit = static_cast<size_t>(std::max(1.f, maxW / 9.f));
+        if (Utf8Count(s) > fit) {
+            size_t cut = Utf8ByteAt(s, fit > 2 ? fit - 2 : fit);
+            s.resize(cut);
+            if (fit > 2) s += "..";
+        }
+        DrawUtf8Text(r, s, x, cy - font * 0.5f, font, kR, kG, kB, 255);
+    }
+
+    void DrawCenterLabel(SDL_Renderer* r, const char* value, float cx, float cy, float scale, bool hovered) {
+        const std::string s = value ? value : "";
+        const int font = std::max(10, static_cast<int>(8.f * scale));
+        const float width = Utf8TextWidth(s, font);
+        DrawUtf8Text(r, s, cx - width * 0.5f, cy - font * 0.5f, font,
+            hovered ? 200 : kR, hovered ? 240 : kG, 255, 255);
     }
 
     // плюс из двух полос с мягким свечением; при наведении светлее
@@ -95,22 +230,41 @@ namespace {
     }
 
     // подпись по центру (cx), с мягким свечением; при наведении светлее
-    void DrawCenterLabel(SDL_Renderer* r, const char* s, float cx, float cy, float scale, bool hovered) {
-        const float cs = float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE);
-        const float textW = float(SDL_strlen(s)) * cs * scale;
-        const Uint8 R = hovered ? 200 : kR, G = hovered ? 240 : kG, B = hovered ? 255 : kB;
 
-        SDL_SetRenderScale(r, scale, scale);
-        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        const float tx = (cx - textW * 0.5f) / scale, ty = (cy - cs * scale * 0.5f) / scale, o = 0.6f;
-        SDL_SetRenderDrawColor(r, R, G, B, 45);
-        SDL_RenderDebugText(r, tx - o, ty, s);
-        SDL_RenderDebugText(r, tx + o, ty, s);
-        SDL_RenderDebugText(r, tx, ty - o, s);
-        SDL_RenderDebugText(r, tx, ty + o, s);
-        SDL_SetRenderDrawColor(r, R, G, B, 255);
-        SDL_RenderDebugText(r, tx, ty, s);
-        SDL_SetRenderScale(r, 1.0f, 1.0f);
+    // название под обложкой: до двух строк по центру, лишнее обрезаем с ".."
+    void DrawCardName(SDL_Renderer* r, const std::string& name, float cx, float top, float maxW) {
+        const size_t fit = static_cast<size_t>(std::max(3.f, std::floor(maxW / 9.f)));
+        std::string first = name, second;
+        if (Utf8Count(first) > fit) {
+            size_t cut = Utf8ByteAt(first, fit);
+            const size_t space = first.rfind(' ', cut);
+            if (space != std::string::npos && space > 0) cut = space;
+            second = first.substr(cut);
+            first.resize(cut);
+            while (!second.empty() && second.front() == ' ') second.erase(0, 1);
+            if (Utf8Count(second) > fit) second.resize(Utf8ByteAt(second, fit > 2 ? fit - 2 : fit)), second += "..";
+        }
+        DrawCenterLabel(r, first.c_str(), cx, top + 8.f, 1.0f, false);
+        if (!second.empty()) DrawCenterLabel(r, second.c_str(), cx, top + 24.f, 1.0f, false);
+    }
+
+    // карточка репозитория: рамка, обложка (или пустой квадрат) и название
+    void DrawRepoCard(SDL_Renderer* r, const RepoCard& c, float x, float y, bool hot) {
+        g_card.x = x; g_card.y = y; g_card.w = kCardW; g_card.h = kCardH;
+        g_card.hovered = hot;                                     // под курсором или с открытым меню
+        TextButton_Draw(r, g_card);
+
+        const float S = kCardW - kCardPad * 2.f;
+        const SDL_FRect box = { std::floor(x + kCardPad), std::floor(y + kCardPad), S, S };
+        if (c.tex) {
+            SDL_RenderTexture(r, c.tex, nullptr, &box);
+        }
+        else {                                                    // обложки нет: тонкий пустой квадрат
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(r, kR, kG, kB, 90);
+            SDL_RenderRect(r, &box);
+        }
+        DrawCardName(r, c.name, x + kCardW * 0.5f, box.y + S + 12.f, kCardW - 20.f);
     }
 
     void FillR(SDL_Renderer* r, float x, float y, float w, float h) {
@@ -165,15 +319,35 @@ void Main_Open(const std::string& login) {
     g_avHover = false;
     g_profile.hovered = g_logout.hovered = g_plus.hovered = false;
     g_import.hovered = g_create.hovered = false;
+    g_mx = g_my = -1.f;
+    g_chosenDir.clear();
+    LoadRepos();
+}
+
+std::string Main_RepoDir() {
+    return g_chosenDir;
+}
+
+void Main_Reload() {
+    LoadRepos();            // после сохранения нового репозитория
 }
 
 void Main_Close() {
     g_login.clear();
     g_open = false;
     g_add = false;
+    g_drag = false;
+    g_chosenDir.clear();
+    FreeRepos();
 }
 
 void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
+    g_profile.label = UiText("PROFILE", "ПРОФИЛЬ");
+    g_logout.label = UiText("LOGOUT", "ВЫЙТИ");
+    g_cmDelete.label = UiText("DELETE", "УДАЛИТЬ");
+    g_cmEdit.label = UiText("EDIT", "ПРАВИТЬ");
+    g_cmOpen.label = UiText("OPEN", "ОТКРЫТЬ");
+
     // надпись как можно выше, у самой рамки окна (центр строки = 5 + половина высоты букв)
     const float titleScale = (w >= 520) ? 3.0f : 2.0f;
     const float titleTop = 5.f;
@@ -190,12 +364,97 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     const float textX = kAvX + kAvD + 14.f;
     DrawLeftText(r, g_login, textX, kAvY + kAvD * 0.5f, float(w) - textX - 70.f);
 
-    // кнопка "+" (под ней потом можно разместить что угодно; список аватара рисуется поверх)
-    g_plus.x = kPlusX;
-    g_plus.y = kPlusY;
-    TextButton_Draw(r, g_plus);
-    DrawPlus(r, g_plus);
-    nd[ndCount++] = TextButton_Rect(g_plus);
+    // сетка репозиториев; "+" стоит сразу после последней карточки (список аватара рисуется поверх)
+    {
+        const float gx = kGridX, gy = kGridY;
+        const float availW = std::max(kCardW, float(w) - gx * 2.f - kBarGutter);
+        const float availH = std::max(kCardH, float(h) - gy - 20.f);
+        g_cols = std::max(1, int((availW + kGap) / (kCardW + kGap)));
+        g_visRows = std::max(1, int((availH + kGap) / (kCardH + kGap)));
+        g_gridRect = { gx, gy, float(g_cols) * (kCardW + kGap) - kGap, float(g_visRows) * (kCardH + kGap) - kGap };
+        ClampScroll();
+        EnsureTextures(r);
+
+        const int n = int(g_repos.size());
+        const int first = g_scrollRow * g_cols;
+        g_plusVisible = false;
+        g_vis.clear();
+        const bool blocked = g_open || g_add || g_drag;          // список аватара / окно "+" / ползунок: карточки не подсвечиваем
+        for (int slot = first; slot < first + g_cols * g_visRows && slot <= n; ++slot) {
+            const int rel = slot - first;
+            const float sx = gx + float(rel % g_cols) * (kCardW + kGap);
+            const float sy = gy + float(rel / g_cols) * (kCardH + kGap);
+            if (slot < n) {
+                const SDL_FRect rc = { sx, sy, kCardW, kCardH };
+                g_vis.push_back({ rc, slot });
+                const bool underMenu = InsideF(g_cmRect, g_mx, g_my);   // курсор над меню карточки
+                const bool hot = (slot == g_cmIdx) || (!blocked && !underMenu && InsideF(rc, g_mx, g_my));
+                DrawRepoCard(r, g_repos[size_t(slot)], sx, sy, hot);
+            }
+            else {                                                // "+" на следующем свободном месте
+                g_plus.x = sx;
+                g_plus.y = sy;
+                g_plusVisible = true;
+                TextButton_Draw(r, g_plus);
+                DrawPlus(r, g_plus);
+            }
+        }
+        nd[ndCount++] = { int(g_gridRect.x), int(g_gridRect.y), int(g_gridRect.w), int(g_gridRect.h) };
+
+        // ползунок: только если ряды не помещаются
+        g_hasBar = MaxScroll() > 0;
+        if (g_hasBar) {
+            g_track = { g_gridRect.x + g_gridRect.w + 8.f, gy, 6.f, g_gridRect.h };
+            const float thumbH = std::max(28.f, g_track.h * float(g_visRows) / float(TotalRows()));
+            const float travel = g_track.h - thumbH;
+            g_thumb = { g_track.x, g_track.y + travel * float(g_scrollRow) / float(MaxScroll()), g_track.w, thumbH };
+
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(r, kR, kG, kB, 40);            // дорожка
+            SDL_RenderFillRect(r, &g_track);
+            const bool hot = g_drag || InsideF(g_thumb, g_mx, g_my);
+            for (int i = 3; i >= 1; --i) {                        // мягкое свечение вокруг ползунка
+                SDL_SetRenderDrawColor(r, kR, kG, kB, Uint8((hot ? 40 : 26) * (1.f - i / 4.f)));
+                const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
+                SDL_RenderFillRect(r, &gl);
+            }
+            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 240 : kG, 255, 255);
+            SDL_RenderFillRect(r, &g_thumb);
+            nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
+        }
+    }
+
+    // меню карточки: рисуется поверх сетки. Если карточку прокрутили за край или её удалили - закрываем
+    if (g_cmIdx >= 0) {
+        bool visible = false;
+        for (const VisCard& v : g_vis) if (v.slot == g_cmIdx) { visible = true; break; }
+        if (!visible || g_open || g_add) CloseCardMenu();
+    }
+    if (g_cmIdx >= 0) {
+        const float mw = kCmItemW + 2.f * kCmPad, mh = 3.f * kCmItemH + 2.f * kCmGap + 2.f * kCmPad;
+        const float mx = std::clamp(g_cmX, 6.f, std::max(6.f, float(w) - mw - 6.f));      // не выходит за окно
+        const float my = std::clamp(g_cmY, 6.f, std::max(6.f, float(h) - mh - 6.f));
+        g_cmRect = { mx, my, mw, mh };
+
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(r, 22, 24, 30, 255);                      // фон, чтобы карточки не просвечивали
+        SDL_RenderFillRect(r, &g_cmRect);
+        SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
+        SDL_RenderRect(r, &g_cmRect);
+
+        g_cmDelete.x = g_cmEdit.x = g_cmOpen.x = mx + kCmPad;
+        g_cmDelete.y = my + kCmPad;
+        g_cmEdit.y = g_cmDelete.y + kCmItemH + kCmGap;
+        g_cmOpen.y = g_cmEdit.y + kCmItemH + kCmGap;
+        g_cmDelete.hovered = InsideF({ g_cmDelete.x, g_cmDelete.y, kCmItemW, kCmItemH }, g_mx, g_my);
+        g_cmEdit.hovered   = InsideF({ g_cmEdit.x, g_cmEdit.y, kCmItemW, kCmItemH }, g_mx, g_my);
+        g_cmOpen.hovered   = InsideF({ g_cmOpen.x, g_cmOpen.y, kCmItemW, kCmItemH }, g_mx, g_my);
+        TextButton_Draw(r, g_cmDelete);
+        TextButton_Draw(r, g_cmEdit);
+        TextButton_Draw(r, g_cmOpen);
+        g_cmLaid = true;
+        nd[ndCount++] = { int(mx), int(my), int(mw), int(mh) };
+    }
 
     // выпадающий список
     if (g_open) {
@@ -257,8 +516,8 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         const float labelScale = (S >= 100.f) ? 2.0f : 1.0f;
         const float labelCy = g_import.y + S + kAddLabelH * 0.5f + 2.f;
-        DrawCenterLabel(r, "IMPORT", g_import.x + S * 0.5f, labelCy, labelScale, g_import.hovered);
-        DrawCenterLabel(r, "CREATE", g_create.x + S * 0.5f, labelCy, labelScale, g_create.hovered);
+        DrawCenterLabel(r, UiText("IMPORT", "ИМПОРТ"), g_import.x + S * 0.5f, labelCy, labelScale, g_import.hovered);
+        DrawCenterLabel(r, UiText("CREATE", "СОЗДАТЬ"), g_create.x + S * 0.5f, labelCy, labelScale, g_create.hovered);
 
         // всё окно без перетаскивания
         nd[ndCount++] = { int(px), int(py), int(pw), int(ph) };
@@ -266,6 +525,8 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 }
 
 MainResult Main_Handle(const SDL_Event& e) {
+    if (e.type == SDL_EVENT_MOUSE_MOTION) { g_mx = e.motion.x; g_my = e.motion.y; }
+
     // окно "+" модальное: события только ему
     if (g_add) {
         g_avHover = false;
@@ -285,8 +546,46 @@ MainResult Main_Handle(const SDL_Event& e) {
         return MainResult::None;
     }
 
-    if (e.type == SDL_EVENT_MOUSE_MOTION)
+    if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) { g_mx = g_my = -1.f; }
+
+    // меню карточки: пока открыто, первым получает клики и Esc
+    if (g_cmIdx >= 0) {
+        if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.key == SDLK_ESCAPE) {
+            CloseCardMenu();
+            return MainResult::None;
+        }
+        if (g_cmLaid && g_cmIdx < int(g_repos.size())) {
+            const std::string dir = g_repos[size_t(g_cmIdx)].dir;
+            if (TextButton_Handle(g_cmDelete, e)) {
+                CloseCardMenu();
+                RepoStore_Delete(dir);
+                const int keep = g_scrollRow;                    // после удаления остаёмся на том же месте списка
+                LoadRepos();
+                g_scrollRow = keep;
+                ClampScroll();
+                return MainResult::None;
+            }
+            if (TextButton_Handle(g_cmEdit, e)) {
+                CloseCardMenu();
+                g_chosenDir = dir;
+                return MainResult::Edit;
+            }
+            if (TextButton_Handle(g_cmOpen, e)) {
+                CloseCardMenu();
+                g_chosenDir = dir;
+                return MainResult::Open;                         // пока main.cpp ничего с этим не делает
+            }
+        }
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            if (InsideF(g_cmRect, e.button.x, e.button.y)) return MainResult::None;   // рамка между пунктами
+            CloseCardMenu();      // клик мимо: закрыть, а сам клик пойдёт дальше (можно сразу открыть другую карточку)
+        }
+        if (e.type == SDL_EVENT_MOUSE_WHEEL) CloseCardMenu();    // меню привязано к экрану, а карточки поедут
+    }
+
+    if (e.type == SDL_EVENT_MOUSE_MOTION) {
         g_avHover = InAvatar(e.motion.x, e.motion.y);
+    }
     if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
         g_avHover = false;
 
@@ -304,8 +603,30 @@ MainResult Main_Handle(const SDL_Event& e) {
         g_profile.hovered = g_logout.hovered = false;
     }
 
-    // "+" не реагирует, пока открыт список аватара (он перекрывает кнопку)
-    if (!g_open) {
+    // ползунок сетки: перетаскивание, клик по дорожке, колесо мыши (пока список аватара закрыт)
+    if (!g_open && g_hasBar) {
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            const SDL_FRect hit = { g_track.x - 6.f, g_track.y, g_track.w + 12.f, g_track.h };
+            if (InsideF(hit, e.button.x, e.button.y)) {
+                g_drag = true;
+                g_dragOff = InsideF({ hit.x, g_thumb.y, hit.w, g_thumb.h }, e.button.x, e.button.y)
+                          ? e.button.y - g_thumb.y            // схватили сам ползунок
+                          : g_thumb.h * 0.5f;                 // клик по дорожке: ползунок прыгает под курсор
+                ScrollFromMouseY(e.button.y);
+                return MainResult::None;
+            }
+        }
+        if (e.type == SDL_EVENT_MOUSE_MOTION && g_drag) ScrollFromMouseY(e.motion.y);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.y != 0.f &&
+            (InsideF(g_gridRect, g_mx, g_my) || InsideF(g_track, g_mx, g_my))) {
+            g_scrollRow += (e.wheel.y > 0.f) ? -1 : 1;           // колесо вверх = ряд выше
+            ClampScroll();
+        }
+    }
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) g_drag = false;
+
+    // "+" не реагирует, пока открыт список аватара (он перекрывает кнопку) или если уехал за край при прокрутке
+    if (!g_open && g_plusVisible) {
         if (TextButton_Handle(g_plus, e)) {
             g_add = true;                                   // открыть окно IMPORT / CREATE
             g_import.hovered = g_create.hovered = false;
@@ -313,6 +634,20 @@ MainResult Main_Handle(const SDL_Event& e) {
     }
     else {
         g_plus.hovered = false;
+    }
+
+    // ЛКМ по карточке репозитория: открыть меню DELETE / EDIT / OPEN (не при открытом списке аватара)
+    if (!g_open && !g_drag && e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+        for (const VisCard& v : g_vis) {
+            if (!InsideF(v.rc, e.button.x, e.button.y)) continue;
+            if (v.slot >= int(g_repos.size())) break;
+            g_cmIdx = v.slot;
+            g_cmX = e.button.x;                                  // меню появляется у курсора
+            g_cmY = e.button.y;
+            g_cmLaid = false;                                    // позиции пунктов появятся после ближайшей отрисовки
+            g_cmDelete.hovered = g_cmEdit.hovered = g_cmOpen.hovered = false;
+            break;
+        }
     }
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
@@ -331,6 +666,11 @@ void Main_Destroy() {
     TextButton_Destroy(g_profile);
     TextButton_Destroy(g_logout);
     TextButton_Destroy(g_plus);
+    TextButton_Destroy(g_card);
+    TextButton_Destroy(g_cmDelete);
+    TextButton_Destroy(g_cmEdit);
+    TextButton_Destroy(g_cmOpen);
+    FreeRepos();
     TextButton_Destroy(g_addPanel);
     TextButton_Destroy(g_import);
     TextButton_Destroy(g_create);

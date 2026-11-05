@@ -31,7 +31,7 @@ namespace {
         g_band.clear();
 
         const float rad = static_cast<float>(radius);
-        const float hw = w * 0.5f, hh = h * 0.5f;
+        const float hw = static_cast<float>(w) * 0.5f, hh = static_cast<float>(h) * 0.5f;
         const float ax = std::max(hw - rad, 0.f), ay = std::max(hh - rad, 0.f);
         const float L = kPi * 0.5f * rad;                 // длина дуги угла
         const float total = 4 * ax + 4 * ay + 4 * L;      // периметр
@@ -42,7 +42,7 @@ namespace {
             for (int x = 0; x < w; ++x) {
                 if (x > band && y > band && x < w - band && y < h - band) continue;
 
-                const float cx = x + 0.5f - hw, cy = y + 0.5f - hh;
+                const float cx = static_cast<float>(x) + 0.5f - hw, cy = static_cast<float>(y) + 0.5f - hh;
                 const float acx = std::fabs(cx), acy = std::fabs(cy);
 
                 // глубина внутрь от контура
@@ -101,7 +101,7 @@ void DrawBorderGlow(SDL_Renderer* r, int w, int h, int radius, int thickness,
     if (!g_tex || g_texRenderer != r || g_w != w || g_h != h)
         Rebuild(r, w, h, radius, thickness, glow, waveLength, red, green, blue);
 
-    const float time = SDL_GetTicks() / 1000.0f;
+    const float time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
     const float k = std::sin(2.f * kPi * breathSpeed * time);   // дыхание k(t)
     const float shift = 2.f * kPi * crawlSpeed * time;          // ползание волн
     const Uint32 rgb = (Uint32(blue) << 16) | (Uint32(green) << 8) | red;

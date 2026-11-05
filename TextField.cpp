@@ -1,4 +1,6 @@
 #include "TextField.h"
+#include "Text.h"
+#include <algorithm>
 
 void TextField_Draw(SDL_Renderer* r, TextField& f) {
     // рамка: при фокусе или наведении светится ярче
@@ -7,36 +9,28 @@ void TextField_Draw(SDL_Renderer* r, TextField& f) {
     f.box.hovered = f.focused || f.hovered;
     TextButton_Draw(r, f.box);
 
-    const float scale = 2.0f;
-    const float cs = float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) * scale;
     const float padX = 12.f;
-    const int maxVis = int((f.w - padX * 2) / cs) - 1;      // сколько символов помещается
-
-    std::string shown = f.password ? std::string(f.text.size(), '*') : f.text;
-    if (int(shown.size()) > maxVis) shown = shown.substr(shown.size() - maxVis);  // показываем хвост
-
-    const float tx = (f.x + padX) / scale;
-    const float ty = (f.y + (f.h - cs) * 0.5f) / scale;
-
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderScale(r, scale, scale);
-
-    if (f.text.empty()) {
-        SDL_SetRenderDrawColor(r, 90, 200, 255, 90);        // подсказка бледная
-        SDL_RenderDebugText(r, tx, ty, f.placeholder);
+    const int fontHeight = std::max(10, static_cast<int>(f.h * 0.42f));
+    std::string shown = f.password ? std::string(Utf8Count(f.text), '*') : f.text;
+    const size_t maxVis = static_cast<size_t>(std::max(1, int((f.w - padX * 2) / NormalizeTextFontHeight(fontHeight))));
+    if (Utf8Count(shown) > maxVis) {
+        size_t pos = 0, skip = Utf8Count(shown) - maxVis;
+        while (pos < shown.size() && skip) {
+            const unsigned char c = static_cast<unsigned char>(shown[pos]);
+            pos += c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4));
+            --skip;
+        }
+        shown.erase(0, pos);
     }
-    else {
-        SDL_SetRenderDrawColor(r, 200, 240, 255, 255);
-        SDL_RenderDebugText(r, tx, ty, shown.c_str());
-    }
+    const float tx = f.x + padX;
+    const float ty = f.y + (f.h - fontHeight) * 0.5f;
+    if (f.text.empty()) DrawUtf8Text(r, f.placeholder, tx, ty, fontHeight, 90, 200, 255, 90);
+    else DrawUtf8Text(r, shown, tx, ty, fontHeight, 200, 240, 255, 255);
 
-    // мигающий курсор
     if (f.focused && (SDL_GetTicks() / 500) % 2 == 0) {
-        SDL_SetRenderDrawColor(r, 90, 200, 255, 255);
-        SDL_RenderDebugText(r, tx + shown.size() * (cs / scale), ty, "_");
+        const float cursorX = tx + Utf8TextWidth(shown, fontHeight);
+        DrawUtf8Text(r, "_", cursorX, ty, fontHeight, 90, 200, 255, 255);
     }
-
-    SDL_SetRenderScale(r, 1.0f, 1.0f);
 }
 
 static bool Inside(const TextField& f, float mx, float my) {
@@ -55,17 +49,11 @@ bool TextField_Handle(TextField& f, const SDL_Event& e) {
 
 void TextField_Input(TextField& f, const SDL_Event& e) {
     if (!f.focused) return;
-
     if (e.type == SDL_EVENT_TEXT_INPUT) {
-        for (const char* p = e.text.text; *p; ++p) {
-            const unsigned char c = static_cast<unsigned char>(*p);
-            // встроенный шрифт SDL умеет только ASCII
-            if (c >= 32 && c < 127 && f.text.size() < f.maxLen)
-                f.text.push_back(char(c));
-        }
+        Utf8AppendLimited(f.text, e.text.text, f.maxLen);
     }
     else if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) {
-        if (!f.text.empty()) f.text.pop_back();
+        Utf8PopBack(f.text);
     }
 }
 

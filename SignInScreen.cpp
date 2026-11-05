@@ -2,6 +2,7 @@
 #include "TextField.h"
 #include "TextButton.h"
 #include "Text.h"
+#include "Localization.h"
 #include <algorithm>
 
 namespace {
@@ -14,12 +15,12 @@ namespace {
     void EnsureInit() {
         if (g_init) return;
         g_init = true;
-        g_f[0].placeholder = "LOGIN";
-        g_f[1].placeholder = "PASSWORD";
+        g_f[0].placeholder = UiText("LOGIN", "ЛОГИН");
+        g_f[1].placeholder = UiText("PASSWORD", "ПАРОЛЬ");
         g_f[1].password = true;
-        g_ok.label = "SIGN IN";
-        g_back.label = "BACK";
-        g_forgot.label = "FORGOT?";
+        g_ok.label = UiText("SIGN IN", "ВОЙТИ");
+        g_back.label = UiText("BACK", "НАЗАД");
+        g_forgot.label = UiText("FORGOT?", "ЗАБЫЛИ?");
         g_forgot.w = 140; g_forgot.h = 32;
     }
 
@@ -71,7 +72,12 @@ void SignIn_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         + forgotGap + g_forgot.h + titleGap + fieldH;
     const float top = std::max(60.f, (h - blockH) * 0.5f);
 
-    DrawCenteredText(r, "SIGN IN", w, h, 3.0f, top + titleH * 0.5f - h * 0.5f);
+    g_f[0].placeholder = UiText("LOGIN", "ЛОГИН");
+    g_f[1].placeholder = UiText("PASSWORD", "ПАРОЛЬ");
+    g_ok.label = UiText("SIGN IN", "ВОЙТИ");
+    g_back.label = UiText("BACK", "НАЗАД");
+    g_forgot.label = UiText("FORGOT?", "ЗАБЫЛИ?");
+    DrawCenteredText(r, UiText("SIGN IN", "ВХОД"), w, h, 3.0f, top + titleH * 0.5f - h * 0.5f);
 
     const float x = (w - fieldW) * 0.5f;
     float y = top + titleH + titleGap;
@@ -98,8 +104,10 @@ void SignIn_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     nd[ndCount++] = TextButton_Rect(g_back);
     nd[ndCount++] = TextButton_Rect(g_ok);
 
-    if (!g_err.empty())
-        DrawCenteredText(r, g_err.c_str(), w, h, 2.0f, y + g_ok.h + 24.f - h * 0.5f, 255, 90, 90);
+    if (!g_err.empty()) {
+        const std::string shownError = UiMessage(g_err);
+        DrawCenteredText(r, shownError.c_str(), w, h, 2.0f, y + g_ok.h + 24.f - h * 0.5f, 255, 90, 90);
+    }
 }
 
 SignInResult SignIn_Handle(const SDL_Event& e) {

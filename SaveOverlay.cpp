@@ -1,11 +1,13 @@
 #include "SaveOverlay.h"
 #include "UserStore.h"
 #include "Text.h"
+#include "Localization.h"
 #include <atomic>
 #include <thread>
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
+#include <string>
 
 namespace {
     enum class Phase { Idle, Intro, Fill, Hold, Outro };
@@ -26,6 +28,9 @@ namespace {
     Uint64 g_phaseT = 0;                     // старт текущей фазы
     float  g_p = 0.f;                        // показанный прогресс 0..1 (только растёт)
     bool   g_ok = false;
+
+    std::string g_lbl[4] = { "LOCAL", "STORAGE", "PBKDF2", "SHA-256" };   // подписи в рамках
+    bool        g_fade = false;                  // плавно затемнять окно (когда под полосой нет окна подтверждения)
 
     std::thread       g_worker;
     std::atomic<int>  g_state{ 0 };          // 0 = работает, 1 = записано, 2 = ошибка
@@ -144,16 +149,19 @@ namespace {
         SDL_RenderRect(r, &lb);
         SDL_RenderRect(r, &rb);
 
-        SDL_SetRenderDrawColor(r, 255, 90, 100, 235);
-        SDL_RenderDebugText(r, lb.x + 8, rowY + 5,  "LOCAL");
-        SDL_RenderDebugText(r, lb.x + 8, rowY + 16, "STORAGE");
-        SDL_RenderDebugText(r, rb.x + 8, rowY + 5,  "PBKDF2");
-        SDL_RenderDebugText(r, rb.x + 8, rowY + 16, "SHA-256");
+        const std::string lbl0 = UiMessage(g_lbl[0]);
+        const std::string lbl1 = UiMessage(g_lbl[1]);
+        const std::string lbl2 = UiMessage(g_lbl[2]);
+        const std::string lbl3 = UiMessage(g_lbl[3]);
+        DrawUtf8Text(r, lbl0, lb.x + 8, rowY + 5, 8, 255, 90, 100, 235);
+        DrawUtf8Text(r, lbl1, lb.x + 8, rowY + 16, 8, 255, 90, 100, 235);
+        DrawUtf8Text(r, lbl2, rb.x + 8, rowY + 5, 8, 255, 90, 100, 235);
+        DrawUtf8Text(r, lbl3, rb.x + 8, rowY + 16, 8, 255, 90, 100, 235);
 
-        char buf[32];
-        if (!result)    std::snprintf(buf, sizeof buf, "SAVING %3d%%", int(g_p * 100.f));
-        else if (g_ok)  std::snprintf(buf, sizeof buf, "SAVED 100%%");
-        else            std::snprintf(buf, sizeof buf, "SAVE FAILED");
+        char buf[64];
+        if (!result) std::snprintf(buf, sizeof buf, UiRussianFlag() ? "СОХРАНЕНИЕ %3d%%" : "SAVING %3d%%", int(g_p * 100.f));
+        else if (g_ok) std::snprintf(buf, sizeof buf, UiText("SAVED 100%%", "СОХРАНЕНО 100%%"));
+        else std::snprintf(buf, sizeof buf, UiText("SAVE FAILED", "ОШИБКА СОХРАНЕНИЯ"));
         DrawCenteredText(r, buf, W, H, 2.0f, (rowY + 14.f) - H * 0.5f, ar, ag, ab);
 
         // лёгкие «строки развёртки»
@@ -175,23 +183,49 @@ namespace {
     }
 }
 
+namespace {
+    void Begin(std::function<bool()> task, bool fade) {
+        g_fade = fade;
+        g_state = 0;
+        g_p = 0.f;
+        g_ok = false;
+        g_t0 = SDL_GetTicks();
+        g_phase = Phase::Intro;
+
+        // настоящая работа идёт в фоне, полоса только показывает ход
+        g_worker = std::thread([task = std::move(task)]() {
+            bool ok = false;
+            try { ok = task(); } catch (...) { ok = false; }
+            g_state = ok ? 1 : 2;
+        });
+    }
+}
+
 void SaveOverlay_Start(const std::string& login, const std::string& password, const std::string& keyword) {
     if (g_phase != Phase::Idle) return;
     Join();
 
-    g_state = 0;
-    g_p = 0.f;
-    g_ok = false;
-    g_t0 = SDL_GetTicks();
-    g_phase = Phase::Intro;
+    g_lbl[0] = "LOCAL";  g_lbl[1] = "STORAGE";
+    g_lbl[2] = "PBKDF2"; g_lbl[3] = "SHA-256";
 
-    // настоящая запись идёт в фоне: хэширование занимает десятки миллисекунд
-    g_worker = std::thread([login = login, password = password, keyword = keyword]() mutable {
+    // хэширование занимает десятки миллисекунд
+    Begin([login = login, password = password, keyword = keyword]() mutable {
         const bool ok = UserStore_Add(login, password, keyword);
         std::fill(password.begin(), password.end(), '\0');       // не держим копии в памяти
         std::fill(keyword.begin(), keyword.end(), '\0');
-        g_state = ok ? 1 : 2;
-    });
+        return ok;
+    }, false);
+}
+
+void SaveOverlay_StartTask(std::function<bool()> task,
+                           const std::string& leftTop, const std::string& leftBottom,
+                           const std::string& rightTop, const std::string& rightBottom) {
+    if (g_phase != Phase::Idle) return;
+    Join();
+
+    g_lbl[0] = leftTop;  g_lbl[1] = leftBottom;
+    g_lbl[2] = rightTop; g_lbl[3] = rightBottom;
+    Begin(std::move(task), true);
 }
 
 bool SaveOverlay_Active() { return g_phase != Phase::Idle; }
@@ -216,6 +250,8 @@ void SaveOverlay_Draw(SDL_Renderer* r, int w, int h) {
     float hf = 1.f;        // высота полосы (0..1)
     float dim = 1.f;       // затемнение окна
     float flash = 0.f;     // вспышка при раскрытии
+    if (g_fade && g_phase == Phase::Intro)       // под полосой нет окна подтверждения: затемняем плавно
+        dim = Clamp01(Sec(now, g_t0) / kIntro);
 
     if (g_phase == Phase::Intro) {
         const float t = Sec(now, g_t0);

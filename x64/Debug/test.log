@@ -2,20 +2,24 @@
   Border.cpp
   Button.cpp
   ConfirmDialog.cpp
-C:\Users\aghan1m666\source\repos\test\test\ConfirmDialog.cpp(76,26): warning C4244: инициализация: преобразование "Uint64" в "Uint32", возможна потеря данных
-C:\Users\aghan1m666\source\repos\test\test\ConfirmDialog.cpp(76,26): warning C4244: инициализация: преобразование "Uint64" в "const Uint32", возможна потеря данных
   CreateScreen.cpp
   main.cpp
   MainScreen.cpp
+  OpenedScreen.cpp
   ProfileScreen.cpp
   RecoverDialog.cpp
+  RepoStore.cpp
   SaveOverlay.cpp
   SignInScreen.cpp
   SignUpScreen.cpp
   Text.cpp
+  TextArea.cpp
   TextButton.cpp
   TextField.cpp
+  TheoryDialog.cpp
   UserStore.cpp
+  Создание кода...
+  Компиляция...
   WindowFrame.cpp
   Создание кода...
   test.vcxproj -> C:\Users\aghan1m666\source\repos\test\x64\Debug\test.exe

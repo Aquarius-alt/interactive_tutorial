@@ -1,6 +1,7 @@
 #include "ConfirmDialog.h"
 #include "TextButton.h"
 #include "Text.h"
+#include "Localization.h"
 #include <cmath>
 #include <string>
 #include <algorithm>
@@ -15,13 +16,14 @@ namespace {
     TextButton g_yes{ 0, 0, 150, 40, "YES" };
 
     SDL_Texture* g_sprite = nullptr;
-    SDL_Texture* g_qmark = nullptr;    // "?" 8x8 пикселей, растягивается без сглаживания
+    SDL_Texture* g_qmark = nullptr;    // символ "?" из Press Start 2P, 16x16 пикселей
     SDL_Renderer* g_owner = nullptr;
     bool          g_spriteTried = false;
     float         g_aspect = 1.4f;
 
     // псевдослучайное число -1..1 из целого
-    float Rand(Uint32 n) {
+    float Rand(Uint64 value) {
+        Uint32 n = static_cast<Uint32>(value ^ (value >> 32));
         n ^= n >> 16; n *= 0x7feb352dU;
         n ^= n >> 15; n *= 0x846ca68bU;
         n ^= n >> 16;
@@ -38,7 +40,7 @@ namespace {
         }
 
         if (!g_qmark) {
-            g_qmark = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 8, 8);
+            g_qmark = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 16, 16);
             SDL_SetTextureScaleMode(g_qmark, SDL_SCALEMODE_NEAREST);
             SDL_SetTextureBlendMode(g_qmark, SDL_BLENDMODE_BLEND);
 
@@ -48,8 +50,8 @@ namespace {
             SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
             SDL_RenderClear(r);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-            SDL_RenderDebugText(r, 0, 0, "?");
+            // Берём вопросительный знак из того же Press Start 2P, что и остальной интерфейс.
+            DrawUtf8Text(r, "?", 0.f, 0.f, 16, 255, 255, 255, 255);
             SDL_SetRenderTarget(r, prev);
         }
 
@@ -73,26 +75,26 @@ namespace {
 
     // глючный знак вопроса: RGB-расслоение + периодические всплески
     void DrawGlitchQ(SDL_Renderer* r, float x, float y, float S) {
-        const Uint32 now = SDL_GetTicks();
-        const Uint32 step = now / 55;                       // глитч меняется ~18 раз/сек
-        const Uint32 phase = now % 1700;
+        const Uint64 now = SDL_GetTicks();
+        const Uint64 step = now / 55;                       // глитч меняется ~18 раз/сек
+        const Uint64 phase = now % 1700;
         const bool burst = phase < 240 || (phase > 900 && phase < 980);
 
         const float split = (burst ? 7.f : 2.f) + 1.5f * std::fabs(Rand(step * 3 + 1));
         const float jy = Rand(step * 5 + 2) * (burst ? 4.f : 1.f);
 
         // смещение каждой строки (только во время всплеска)
-        float rowShift[8];
-        for (int i = 0; i < 8; ++i)
+        float rowShift[16];
+        for (int i = 0; i < 16; ++i)
             rowShift[i] = (burst && Rand(step * 7 + i) > 0.1f) ? Rand(step * 13 + i) * S * 1.3f : 0.f;
 
         auto layer = [&](Uint8 cr, Uint8 cg, Uint8 cb, Uint8 a, float dx, float dy) {
             SDL_SetTextureColorMod(g_qmark, cr, cg, cb);
             SDL_SetTextureAlphaMod(g_qmark, a);
-            for (int i = 0; i < 8; ++i) {
-                const SDL_FRect src = { 0.f, float(i), 8.f, 1.f };
+            for (int i = 0; i < 16; ++i) {
+                const SDL_FRect src = { 0.f, float(i), 16.f, 1.f };
                 const SDL_FRect dst = { std::round(x + dx + rowShift[i]),
-                                        std::round(y + dy + i * S), 8 * S, S };
+                                        std::round(y + dy + i * S), 16 * S, S };
                 SDL_RenderTexture(r, g_qmark, &src, &dst);
             }
             };
@@ -111,7 +113,7 @@ namespace {
         if (burst) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_ADD);
             SDL_SetRenderDrawColor(r, 40, 230, 255, 120);
-            const SDL_FRect bar = { x - 10, y + (Rand(step * 17) * 0.5f + 0.5f) * 8 * S, 8 * S + 20, 3 };
+            const SDL_FRect bar = { x - 10, y + (Rand(step * 17) * 0.5f + 0.5f) * 16 * S, 16 * S + 20, 3 };
             SDL_RenderFillRect(r, &bar);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         }
@@ -146,14 +148,16 @@ void Confirm_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     g_panel.x = px; g_panel.y = py; g_panel.hovered = false;
     TextButton_Draw(r, g_panel);
 
-    DrawCenteredText(r, "ARE YOU SURE?", w, h, 3.0f, py + 34.f - h * 0.5f);
+    g_no.label = UiText("NO", "НЕТ");
+    g_yes.label = UiText("YES", "ДА");
+    DrawCenteredText(r, UiText("ARE YOU SURE?", "ВЫ УВЕРЕНЫ?"), w, h, 3.0f, py + 34.f - h * 0.5f);
 
     // средняя строка: спрайт + глючный знак вопроса
     const float rowTop = py + 70.f;
     const float sh = 100.f;
     const float sw = std::min(sh * g_aspect, 180.f);
-    const float S = 11.f;                       // размер пикселя знака вопроса
-    const float qW = 8 * S;
+    const float S = 5.5f;                      // 16 x 16 пиксельный глиф Press Start 2P
+    const float qW = 16 * S;
     const float gap = 28.f;
     const float x0 = px + (kPanelW - (sw + gap + qW)) * 0.5f;
 
@@ -173,7 +177,7 @@ void Confirm_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     SDL_SetRenderDrawColor(r, kR, kG, kB, 255);
     SDL_RenderRect(r, &sprite);
 
-    DrawGlitchQ(r, x0 + sw + gap, rowTop + (sh - 8 * S) * 0.5f, S);
+    DrawGlitchQ(r, x0 + sw + gap, rowTop + (sh - 16 * S) * 0.5f, S);
 
     // кнопки
     const float btnGap = 20.f;
