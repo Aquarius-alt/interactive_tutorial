@@ -24,7 +24,8 @@ void TextField_Draw(SDL_Renderer* r, TextField& f) {
     }
     const float tx = f.x + padX;
     const float ty = f.y + (f.h - fontHeight) * 0.5f;
-    if (f.text.empty()) DrawUtf8Text(r, f.placeholder, tx, ty, fontHeight, 90, 200, 255, 90);
+    if (f.text.empty()) DrawUtf8TextFit(r, f.placeholder, tx, f.y + f.h * 0.5f, f.w - padX * 2.f,
+        fontHeight, false, 90, 200, 255, 90);          // подсказка не вылезает за рамку при любом языке
     else DrawUtf8Text(r, shown, tx, ty, fontHeight, 200, 240, 255, 255);
 
     if (f.focused && (SDL_GetTicks() / 500) % 2 == 0) {
@@ -50,10 +51,25 @@ bool TextField_Handle(TextField& f, const SDL_Event& e) {
 void TextField_Input(TextField& f, const SDL_Event& e) {
     if (!f.focused) return;
     if (e.type == SDL_EVENT_TEXT_INPUT) {
+        UndoBefore(f.undo, f.text, 1);
         Utf8AppendLimited(f.text, e.text.text, f.maxLen);
+        UndoCommit(f.undo, f.text);
     }
     else if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) {
+        UndoBefore(f.undo, f.text, 2);
         Utf8PopBack(f.text);
+        UndoCommit(f.undo, f.text);
+    }
+    else if (IsPasteEvent(e)) {
+        UndoBefore(f.undo, f.text, 3);
+        Utf8PasteLimited(f.text, f.maxLen, false);
+        UndoCommit(f.undo, f.text);
+    }
+    else if (IsCopyEvent(e)) {
+        if (!f.password) CopyText(f.text);          // из поля пароля не копируем
+    }
+    else if (IsUndoEvent(e)) {
+        UndoApply(f.undo, f.text);
     }
 }
 

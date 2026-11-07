@@ -10,7 +10,8 @@
 // Окно закрывается по Esc, по клику мимо него или по выбору одной из кнопок.
 
 // Клик ЛКМ по карточке репозитория открывает маленькое меню: DELETE, EDIT, OPEN.
-//   DELETE - удаляет папку репозитория с диска (внутри экрана, список обновляется сам);
+//   DELETE - сначала окно "ARE YOU SURE?" (как в SignUp), после YES удаляет папку репозитория с диска
+//            (внутри экрана, список обновляется сам);
 //   EDIT   - MainResult::Edit, папку репозитория отдаёт Main_RepoDir();
 //   OPEN   - MainResult::Open (пока ничего не делает), папка там же.
 // Меню закрывается по Esc, по клику мимо него или по выбору пункта.
@@ -23,4 +24,5 @@ void       Main_Close();                          // при выходе из а
 std::string Main_RepoDir();                       // папка репозитория, выбранного в меню (после Edit / Open)
 void       Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount);
 MainResult Main_Handle(const SDL_Event& e);       // Profile / Logout = пункты списка аватара, Import / Create = кнопки окна "+"
+bool       Main_IsModalOpen();                    // открыто окно "+" (IMPORT / CREATE) поверх экрана
 void       Main_Destroy();                        // до SDL_DestroyRenderer

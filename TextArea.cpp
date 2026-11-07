@@ -46,7 +46,8 @@ void TextArea_Draw(SDL_Renderer* r, TextArea& a) {
     a.scroll = std::clamp(a.scroll, 0, static_cast<int>(maxFirst));
     const size_t first = maxFirst - static_cast<size_t>(a.scroll);
 
-    if (a.text.empty()) DrawUtf8Text(r, a.placeholder, a.x + padX, a.y + padY, fontHeight, kR, kG, kB, 90);
+    if (a.text.empty()) DrawUtf8TextFit(r, a.placeholder, a.x + padX, a.y + padY + fontHeight * 0.5f, a.w - padX * 2.f,
+        fontHeight, false, kR, kG, kB, 90);
     else {
         const size_t last = std::min(lines.size(), first + rows);
         for (size_t i = first; i < last; ++i)
@@ -79,12 +80,28 @@ bool TextArea_Handle(TextArea& a, const SDL_Event& e) {
 void TextArea_Input(TextArea& a, const SDL_Event& e) {
     if (!a.focused) return;
     if (e.type == SDL_EVENT_TEXT_INPUT) {
+        UndoBefore(a.undo, a.text, 1);
         Utf8AppendLimited(a.text, e.text.text, a.maxLen);
+        UndoCommit(a.undo, a.text);
         a.scroll = 0;
     }
     else if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) {
+        UndoBefore(a.undo, a.text, 2);
         Utf8PopBack(a.text);
+        UndoCommit(a.undo, a.text);
         a.scroll = 0;
+    }
+    else if (IsPasteEvent(e)) {
+        UndoBefore(a.undo, a.text, 3);
+        Utf8PasteLimited(a.text, a.maxLen, true);
+        UndoCommit(a.undo, a.text);
+        a.scroll = 0;
+    }
+    else if (IsCopyEvent(e)) {
+        CopyText(a.text);
+    }
+    else if (IsUndoEvent(e)) {
+        if (UndoApply(a.undo, a.text)) a.scroll = 0;
     }
 }
 

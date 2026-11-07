@@ -3,9 +3,9 @@
 
 struct MenuButton {
     float x = 0, y = 0;      // левый верхний угол иконки
-    float size = 28;         // ширина иконки, px
+    float size = 28;         // диаметр шестерни, px
     bool  hovered = false;
-    bool  open = false;      // false = полоски, true = крестик (экран меню)
+    bool  open = false;      // false = шестерня в покое, true = шестерня довернулась (экран меню открыт)
 
     // внутреннее (не трогать)
     float         anim = 0;  // 0..1 прогресс превращения
@@ -16,7 +16,7 @@ struct MenuButton {
     float         builtSize = 0;
 };
 
-inline float MenuButtonHeight(float size) { return size * 0.7f; }
+inline float MenuButtonHeight(float size) { return size; }   // шестерня квадратная
 
 void MenuButton_Draw(SDL_Renderer* r, MenuButton& b);
 bool MenuButton_Handle(MenuButton& b, const SDL_Event& e); // true = клик ЛКМ

@@ -110,10 +110,14 @@ namespace {
         SDL_RenderFillRect(r, &rc);
         NeonRect(r, rc, GR, GG, GB, b.hover ? 1.6f : 1.f);
 
-        const float sc = 2.f;
-        const float tw = TextW(label, sc);
-        if (b.hover) Txt(r, label, b.x + (b.w - tw) * 0.5f, b.y + (b.h - 8.f * sc) * 0.5f, sc, 210, 255, 225);
-        else         Txt(r, label, b.x + (b.w - tw) * 0.5f, b.y + (b.h - 8.f * sc) * 0.5f, sc, GR, GG, GB);
+        // подпись всегда внутри кнопки: мельче, а если и так не влезает - с ".."
+        const float sc = FitScale(label, b.w - 16.f);
+        const int px = NormalizeTextFontHeight(static_cast<int>(8.f * sc));
+        const std::string shown = Utf8Fit(label, b.w - 16.f, px);
+        const float tw = TextW(shown, sc);
+        const float ty = b.y + (b.h - float(px)) * 0.5f;
+        if (b.hover) Txt(r, shown, b.x + (b.w - tw) * 0.5f, ty, sc, 210, 255, 225);
+        else         Txt(r, shown, b.x + (b.w - tw) * 0.5f, ty, sc, GR, GG, GB);
     }
 
     void EnsureTex(SDL_Renderer* r, int W, int H) {
@@ -319,7 +323,8 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     switch (g_phase) {
     case Phase::Input: {
         const std::string sub = UiText("ENTER YOUR KEYWORD", "ВВЕДИТЕ КЛЮЧЕВОЕ СЛОВО");
-        Txt(r, sub, px + (W - TextW(sub, 2.f)) * 0.5f, py + 68.f, 2.f, GR, GG, GB, 170);
+        const float subSc = FitScale(sub, W - 24.f);                       // «ВВЕДИТЕ КЛЮЧЕВОЕ СЛОВО» длиннее английского
+        Txt(r, sub, px + (W - TextW(sub, subSc)) * 0.5f, py + 68.f + (2.f - subSc) * 4.f, subSc, GR, GG, GB, 170);
 
         // поле ввода
         const SDL_FRect fr = { bx, py + 96.f, bw, 40.f };
@@ -333,7 +338,10 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         if (int(shown_s.size()) > maxVis) shown_s = shown_s.substr(shown_s.size() - maxVis);   // хвост
         const float ty = fr.y + (fr.h - cs) * 0.5f;
         if (g_field.text.empty()) {
-            Txt(r, g_field.placeholder, fr.x + 12.f, ty, 2.f, GR, GG, GB, 90, false);
+            const std::string ph = g_field.placeholder ? g_field.placeholder : "";
+            const float phSc = FitScale(ph, fr.w - 24.f);
+            const int phPx = NormalizeTextFontHeight(static_cast<int>(8.f * phSc));
+            Txt(r, Utf8Fit(ph, fr.w - 24.f, phPx), fr.x + 12.f, fr.y + (fr.h - float(phPx)) * 0.5f, phSc, GR, GG, GB, 90, false);
         }
         else {
             Txt(r, shown_s, fr.x + 12.f, ty, 2.f, 190, 255, 215, 255, false);
@@ -435,7 +443,7 @@ void Recover_Handle(const SDL_Event& e) {
         if (enter) { TrySearch(); return; }
 
         const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
-        if (e.type == SDL_EVENT_TEXT_INPUT || backspace) {
+        if (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e)) {
             TextField_Input(g_field, e);
             g_err.clear();
         }

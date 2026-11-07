@@ -121,7 +121,7 @@ SignInResult SignIn_Handle(const SDL_Event& e) {
     if (TextButton_Handle(g_ok, e) && Validate()) return SignInResult::Done;
 
     const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
-    if (e.type == SDL_EVENT_TEXT_INPUT || backspace) {
+    if (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e)) {
         for (auto& f : g_f) TextField_Input(f, e);
         g_err.clear();
     }

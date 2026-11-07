@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <algorithm>
 #include "WindowFrame.h"
 #include "Border.h"
 #include "Button.h"
@@ -18,6 +19,7 @@
 #include "SaveOverlay.h"
 #include "RepoStore.h"
 #include "OpenedScreen.h"
+#include "TheoryDialog.h"
 #include "Localization.h"
 #include <algorithm>
 #include <string>
@@ -31,7 +33,7 @@ static std::string g_editDir;   // папка репозитория, котор
 static bool g_repoSaving = false;   // идёт сохранение нового репозитория (полоса загрузки поверх главного экрана)
 static TextButton g_signIn{ 0, 0, 150, 40, "SIGN IN" };
 static TextButton g_signUp{ 0, 0, 150, 40, "SIGN UP" };
-static MenuButton g_menu{ 0, 16, 18 };   // x (считается сам), y, ширина иконки
+static MenuButton g_menu{ 0, 0, 26 };    // x и y считаются сами (правый нижний угол), диаметр шестерни
 // Настройки меню приложения.
 static bool g_menuInterfacePage = false;
 static bool g_lngDropdownOpen = false;
@@ -213,7 +215,7 @@ static void SetUiLanguage(bool russian) {
     SaveLanguagePreference(russian);
 }
 
-static const char* kVersion = "v0.1";
+static const char* kVersion = "v0.1.1";
 
 // маленькая подпись по нижним углам: слева автор, справа версия
 static void DrawFooter(int w, int h) {
@@ -223,9 +225,23 @@ static void DrawFooter(int w, int h) {
     const std::string author = "by Aquarius";
 
     DrawUtf8Text(g_renderer, author, margin, y, fontHeight, 90, 200, 255, 150);
+    // справа внизу стоит шестерня настроек: версия сдвинута левее неё
+    const float versionRight = static_cast<float>(w) - 20.f - g_menu.size - 14.f;
     DrawUtf8Text(g_renderer, kVersion,
-        static_cast<float>(w) - margin - Utf8TextWidth(kVersion, fontHeight),
+        versionRight - Utf8TextWidth(kVersion, fontHeight),
         y, fontHeight, 90, 200, 255, 150);
+}
+
+// Окно поверх экрана (FORGOT, новая теория / тест, IMPORT / CREATE, просмотр картинки): пока оно открыто,
+// шестерня настроек лежит под ним и не нажимается.
+static bool ModalOpen() {
+    switch (g_screen) {
+    case Screen::SignIn: return Recover_IsOpen();
+    case Screen::Create: return Theory_IsOpen();
+    case Screen::Main:   return Main_IsModalOpen();
+    case Screen::Opened: return Opened_IsViewing();
+    default:             return false;
+    }
 }
 
 static void Draw() {
@@ -236,31 +252,36 @@ static void Draw() {
     int w = 0, h = 0;
     SDL_GetCurrentRenderOutputSize(g_renderer, &w, &h);
 
-    // кнопка меню у правого края
+    // кнопка настроек (шестерня): правый нижний угол
     const float margin = 20.f;
     g_menu.x = w - margin - g_menu.size;
+    g_menu.y = h - margin - MenuButtonHeight(g_menu.size);
 
     // подпись внизу на всех экранах, кроме главного (там "by Aquarius" уже вверху)
-    if (g_screen != Screen::Main) DrawFooter(w, h);
+    // (и пока открыто окно теории на весь экран: оно упирается в подпись)
+    if (g_screen != Screen::Main && !(g_screen == Screen::Create && Theory_IsOpen())) DrawFooter(w, h);
 
     int ndCount = 0;
     nd[ndCount++] = { int(g_menu.x) - 6, int(g_menu.y) - 6,
                       int(g_menu.size) + 12, int(MenuButtonHeight(g_menu.size)) + 12 };
 
-    // Кнопки управления безрамочным окном: слева от кнопки MENU.
-    const int menuCenterX = static_cast<int>(std::lround(g_menu.x + g_menu.size * 0.5f));
-    const int menuCenterY = static_cast<int>(std::lround(g_menu.y + MenuButtonHeight(g_menu.size) * 0.5f));
-    const int controlY = menuCenterY - 14;
-    // Центры CLOSE, MINIMIZE и MENU находятся на одной оси с шагом 34 px.
-    g_minimizeRect = { menuCenterX - 34 - 14, controlY, 28, 28 };
-    g_closeRect = { menuCenterX - 68 - 14, controlY, 28, 28 };
+    // Кнопки управления безрамочным окном: в правом верхнем углу, на месте бывшей кнопки меню.
+    // CLOSE у самого края, MINIMIZE левее него; центры на одной оси с шагом 34 px.
+    const int controlCenterX = static_cast<int>(std::lround(float(w) - margin - 9.f));
+    const int controlY = 8;
+    g_closeRect = { controlCenterX - 14, controlY, 28, 28 };
+    g_minimizeRect = { controlCenterX - 34 - 14, controlY, 28, 28 };
     nd[ndCount++] = g_minimizeRect;
     nd[ndCount++] = g_closeRect;
+
+    // Шестерня рисуется до содержимого экрана: окна поверх экрана перекрывают её (и затемняют), а не наоборот.
+    MenuButton_Draw(g_renderer, g_menu);
 
     if (!g_menu.open) {
         if (g_screen == Screen::Login) {
             g_signIn.label = UiText("SIGN IN", "ВХОД");
             g_signUp.label = UiText("SIGN UP", "РЕГИСТРАЦИЯ");
+            g_signIn.w = g_signUp.w = std::max(150.f, Utf8TextWidth(g_signUp.label, 16) + 32.f);   // обе кнопки одной ширины
             DrawCenteredText(g_renderer, UiText("LOGIN WINDOW", "ОКНО ВХОДА"), w, h, 3.0f, -60.0f);
 
             const float gap = 20.f;
@@ -360,7 +381,6 @@ static void Draw() {
     DrawControlIcon(g_renderer, g_minimizeTextures, g_minimizeRect, false, g_minimizeHovered);
     DrawControlIcon(g_renderer, g_closeTextures, g_closeRect, true, g_closeHovered);
 
-    MenuButton_Draw(g_renderer, g_menu);
     DrawBorderGlow(g_renderer, w, h, kRadius, 1, 20, 120, 90.0f, 0.35f, 0.06f);
 
     SDL_RenderPresent(g_renderer);
@@ -462,7 +482,8 @@ int main(int argc, char* argv[]) {
                 // на экранах входа/регистрации Esc обрабатывает сам экран (назад)
             }
 
-            if (MenuButton_Handle(g_menu, e)) {
+            if (ModalOpen()) g_menu.hovered = false;
+            if (!ModalOpen() && MenuButton_Handle(g_menu, e)) {
                 g_menu.open = !g_menu.open;
                 g_menuInterfacePage = false;
                 g_lngDropdownOpen = false;

@@ -8,36 +8,76 @@ namespace {
     const Uint8 kR = 90, kG = 200, kB = 255;  // голубой
     const float kGlowStrength = 0.30f;        // яркость свечения (0..1)
     const float kGlowFalloff = 2.6f;         // ширина свечения
-    const float kAnimTime = 0.25f;        // длительность превращения, сек
+    const float kAnimTime = 0.25f;        // длительность поворота, сек
+    const float kPi = 3.14159265f;
+    const int   kTeeth = 8;                   // зубцов у шестерни
+    const double kTurnDeg = 90.0;             // на сколько доворачивается шестерня при открытии меню
 
     Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | (Uint32(kB) << 16) | (Uint32(kG) << 8) | kR; }
 
     float Thickness(float s) { return std::max(1.5f, s * 0.08f); }
 
-    // одна горизонтальная полоска-капсула; из неё собирается вся иконка
+    struct Seg { float x1, y1, x2, y2; };
+
+    float DistToSeg(float px, float py, const Seg& s) {
+        const float dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+        const float l2 = dx * dx + dy * dy;
+        float t = 0.f;
+        if (l2 > 0.f) t = std::clamp(((px - s.x1) * dx + (py - s.y1) * dy) / l2, 0.f, 1.f);
+        const float ox = px - (s.x1 + t * dx), oy = py - (s.y1 + t * dy);
+        return std::sqrt(ox * ox + oy * oy);
+    }
+
+    // контур шестерни (зубцы) ломаной вокруг точки (cx, cy)
+    void GearOutline(std::vector<Seg>& out, float cx, float cy, float Ro) {
+        const float Rr = Ro * 0.76f;                  // радиус впадин
+        const float pitch = 2.f * kPi / float(kTeeth);
+        std::vector<std::pair<float, float>> pts;     // (радиус, угол)
+        for (int i = 0; i < kTeeth; ++i) {
+            const float a = float(i) * pitch;
+            pts.push_back({ Rr, a - 0.34f * pitch });
+            pts.push_back({ Ro, a - 0.19f * pitch });
+            pts.push_back({ Ro, a });                  // середина вершины зубца (дуга)
+            pts.push_back({ Ro, a + 0.19f * pitch });
+            pts.push_back({ Rr, a + 0.34f * pitch });
+            pts.push_back({ Rr, a + 0.50f * pitch });  // середина впадины (дуга)
+        }
+        for (size_t i = 0; i < pts.size(); ++i) {
+            const auto& A = pts[i];
+            const auto& B = pts[(i + 1) % pts.size()];
+            out.push_back({ cx + A.first * std::cos(A.second), cy + A.first * std::sin(A.second),
+                            cx + B.first * std::cos(B.second), cy + B.first * std::sin(B.second) });
+        }
+    }
+
+    // две текстуры: чёткое ядро и мягкое свечение, как у остальных неоновых иконок
     void Rebuild(SDL_Renderer* r, MenuButton& b) {
         if (b.core) SDL_DestroyTexture(b.core);
         if (b.glow) SDL_DestroyTexture(b.glow);
 
         const float s = b.size;
-        const float t = Thickness(s);
-        const float half = (s - t) * 0.5f;
-
+        const float t = std::max(1.8f, s * 0.075f);     // толщина линии
         const int tw = int(std::ceil(s)) + kPad * 2;
-        const int th = int(std::ceil(t)) + kPad * 2;
-        const float cx = tw * 0.5f, cy = th * 0.5f;   // центр полоски = центр текстуры
+        const int th = tw;
+        const float cx = tw * 0.5f, cy = th * 0.5f;
+        const float Ro = s * 0.5f - t * 0.5f - 0.5f;    // внешний радиус зубцов
+        const float Rin = Ro * 0.36f;                   // радиус отверстия
+
+        std::vector<Seg> segs;
+        GearOutline(segs, cx, cy, Ro);
 
         std::vector<Uint32> coreBuf(size_t(tw) * th, 0), glowBuf(size_t(tw) * th, 0);
-
         for (int py = 0; py < th; ++py) {
             for (int px = 0; px < tw; ++px) {
-                const float dx = std::max(std::fabs(px + 0.5f - cx) - half, 0.f);
-                const float dy = py + 0.5f - cy;
-                const float dist = std::sqrt(dx * dx + dy * dy) - t * 0.5f;
+                const float x = px + 0.5f, y = py + 0.5f;
+                float d = 1000.f;
+                for (const Seg& sg : segs) d = std::min(d, DistToSeg(x, y, sg));
+                const float ox = x - cx, oy = y - cy;
+                d = std::min(d, std::fabs(std::sqrt(ox * ox + oy * oy) - Rin));   // отверстие в центре
 
+                const float dist = d - t * 0.5f;        // расстояние от края линии
                 const float c = std::clamp(0.5f - dist, 0.f, 1.f);
                 if (c > 0.f) coreBuf[size_t(py) * tw + px] = Pack(Uint8(c * 255));
-
                 if (dist > 0.f) {
                     const float g = kGlowStrength * std::exp(-dist / kGlowFalloff);
                     if (g > 0.004f) glowBuf[size_t(py) * tw + px] = Pack(Uint8(g * 255));
@@ -55,23 +95,6 @@ namespace {
         b.glow = make(glowBuf);
         b.owner = r;
         b.builtSize = s;
-    }
-
-    void DrawBar(SDL_Renderer* r, MenuButton& b, float cx, float cy, double angle, float alpha) {
-        if (alpha <= 0.f) return;
-
-        float tw, th;
-        SDL_GetTextureSize(b.core, &tw, &th);
-        const SDL_FRect dst = { cx - tw * 0.5f, cy - th * 0.5f, tw, th };
-
-        const Uint8 glowA = Uint8((b.hovered ? 255 : 190) * alpha);
-        SDL_SetTextureAlphaMod(b.glow, glowA);
-        SDL_RenderTextureRotated(r, b.glow, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
-        if (b.hovered)   // второй проход усиливает неон при наведении
-            SDL_RenderTextureRotated(r, b.glow, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
-
-        SDL_SetTextureAlphaMod(b.core, Uint8(255 * alpha));
-        SDL_RenderTextureRotated(r, b.core, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
     }
 }
 
@@ -92,17 +115,19 @@ void MenuButton_Draw(SDL_Renderer* r, MenuButton& b) {
     const float a = b.anim;
     const float e = a * a * (3.f - 2.f * a);         // плавный старт и финиш
 
-    const float t = Thickness(b.size);
-    const float h = MenuButtonHeight(b.size);
-    const float cx = b.x + b.size * 0.5f;
-    const float midY = b.y + h * 0.5f;
-    const float topY = b.y + t * 0.5f;
-    const float botY = b.y + h - t * 0.5f;
+    float tw, th;
+    SDL_GetTextureSize(b.core, &tw, &th);
+    const float cx = b.x + b.size * 0.5f, cy = b.y + b.size * 0.5f;
+    const SDL_FRect dst = { cx - tw * 0.5f, cy - th * 0.5f, tw, th };
+    const double angle = kTurnDeg * e;                // шестерня поворачивается при открытии / закрытии меню
 
-    // верх и низ стягиваются к центру и поворачиваются, середина гаснет
-    DrawBar(r, b, cx, topY + (midY - topY) * e, 45.0 * e, 1.f);
-    DrawBar(r, b, cx, midY, 0.0, 1.f - e);
-    DrawBar(r, b, cx, botY + (midY - botY) * e, -45.0 * e, 1.f);
+    SDL_SetTextureAlphaMod(b.glow, Uint8(b.hovered ? 255 : 190));
+    SDL_RenderTextureRotated(r, b.glow, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
+    if (b.hovered)   // второй проход усиливает неон при наведении
+        SDL_RenderTextureRotated(r, b.glow, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
+
+    SDL_SetTextureAlphaMod(b.core, 255);
+    SDL_RenderTextureRotated(r, b.core, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
 }
 
 static bool Inside(const MenuButton& b, float mx, float my) {

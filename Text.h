@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <string>
 #include <cstddef>
+#include <vector>
 
 void DrawCenteredText(SDL_Renderer* r, const char* text, int w, int h,
     float scale = 3.0f, float yOffset = 0.0f,
@@ -16,3 +17,37 @@ float Utf8TextWidth(const std::string& text, int fontHeight);
 size_t Utf8Count(const std::string& text);
 void Utf8PopBack(std::string& text);
 void Utf8AppendLimited(std::string& target, const char* input, size_t maxCharacters);
+
+// ---- Fitting text into a given width (localized strings can be much longer) ----
+// Largest font height (multiple of 8, <= preferred, >= 8) at which text fits maxWidth.
+int FitFontHeight(const std::string& text, float maxWidth, int preferred);
+// Cuts text and adds ".." so it fits maxWidth at fontHeight (text unchanged if it already fits).
+std::string Utf8Fit(const std::string& text, float maxWidth, int fontHeight);
+// Draws text inside a box of width boxW starting at boxX: shrinks the font first, then cuts with "..".
+// centered = true centers the text in the box; y is the vertical CENTER of the line.
+void DrawUtf8TextFit(SDL_Renderer* r, const std::string& text, float boxX, float centerY, float boxW,
+    int preferredFont, bool centered, Uint8 red = 200, Uint8 green = 240, Uint8 blue = 255, Uint8 alpha = 255);
+
+// Clipboard paste: Ctrl+V / Cmd+V / Shift+Insert (works on any keyboard layout, e.g. Russian).
+bool IsPasteEvent(const SDL_Event& e);
+// Appends clipboard text to target, up to maxCharacters in total.
+// multiline = false: line breaks and tabs become spaces (for single-line fields).
+// Returns true if the event was a paste shortcut (even if the clipboard was empty).
+bool Utf8PasteLimited(std::string& target, size_t maxCharacters, bool multiline);
+
+// Ctrl+C / Cmd+C / Ctrl+Insert and Ctrl+Z / Cmd+Z (scancode based: any keyboard layout).
+bool IsCopyEvent(const SDL_Event& e);
+bool IsUndoEvent(const SDL_Event& e);
+bool IsEditShortcut(const SDL_Event& e);      // paste, copy or undo
+void CopyText(const std::string& text);       // puts text on the clipboard (ignored if empty)
+
+// Undo history for one text control.
+struct UndoHistory {
+    std::vector<std::string> stack;
+    std::string last;       // text right after our last change (to notice outside edits)
+    int kind = 0;           // 1 = typing, 2 = deleting, 3 = other (paste); typing/deleting runs merge
+    Uint64 time = 0;
+};
+void UndoBefore(UndoHistory& h, const std::string& text, int kind);   // call BEFORE changing text
+void UndoCommit(UndoHistory& h, const std::string& text);             // call AFTER changing text
+bool UndoApply(UndoHistory& h, std::string& text);                    // Ctrl+Z; false = nothing to undo

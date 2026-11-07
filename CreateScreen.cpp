@@ -408,6 +408,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     // Все подписи обновляются каждый кадр, поэтому переключение языка действует сразу.
     g_back.label = UiText("BACK", "НАЗАД");
     g_ok.label = g_editMode ? UiText("SAVE", "СОХРАНИТЬ") : UiText("CREATE", "СОЗДАТЬ");
+    g_ok.w = std::max(150.f, Utf8TextWidth(g_ok.label, 16) + 32.f);          // «СОХРАНИТЬ» не влезает в 150 px
     g_name.placeholder = UiText("NAME", "НАЗВАНИЕ");
     g_desc.placeholder = UiText("DESCRIPTION", "ОПИСАНИЕ");
     g_menuEdit.label = UiText("EDIT", "ПРАВИТЬ");
@@ -520,7 +521,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         if (g_menuIdx >= 0 && (g_menuIdx >= n || g_menuIdx < first || g_menuIdx >= first + kPerPage))
             CloseMenu();
         if (g_menuIdx >= 0) {
-            const float pad = 8.f, itemW = 120.f, itemH = 34.f, itemGap = 8.f;
+            const float pad = 8.f, itemW = 140.f, itemH = 34.f, itemGap = 8.f;
             const float mw = itemW + 2.f * pad, mh = 2.f * itemH + itemGap + 2.f * pad;
             const SDL_FRect d = g_dotsRect;
             float mx = d.x + d.w - mw;                                   // правым краем под точки
@@ -582,7 +583,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
     // кнопка CREATE справа, BACK слева
     g_back.x = m;                    g_back.y = bottomY;
-    g_ok.x = float(w) - m - g_ok.w;  g_ok.y = bottomY;
+    g_ok.x = float(w) - 58.f - g_ok.w;  g_ok.y = bottomY;   // справа внизу окна стоит шестерня настроек: оставляем ей место
     TextButton_Draw(r, g_back);
     TextButton_Draw(r, g_ok);
     nd[ndCount++] = TextButton_Rect(g_back);
@@ -592,7 +593,9 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     if (!g_err.empty()) {
         const float scale = (w >= 560) ? 2.0f : 1.0f;
         const std::string shownError = UiMessage(g_err);
-        DrawCenteredText(r, shownError.c_str(), w, h, scale, bottomY + g_ok.h * 0.5f - h * 0.5f, 255, 90, 90);
+        const float lo = g_back.x + g_back.w + 16.f, hi = g_ok.x - 16.f;      // свободное место между кнопками
+        DrawUtf8TextFit(r, shownError, lo, bottomY + g_ok.h * 0.5f, hi - lo,
+            std::max(8, static_cast<int>(8.f * scale)), true, 255, 90, 90, 255);
     }
 
     Theory_Draw(r, w, h, nd, ndCount);      // плавающее окно теории поверх экрана
@@ -737,7 +740,7 @@ CreateResult Create_Handle(const SDL_Event& e) {
 
     // ввод символов (только на вкладке INFO); при правке убираем сообщение об ошибке
     const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
-    if (g_tab == 0 && (e.type == SDL_EVENT_TEXT_INPUT || backspace)) {
+    if (g_tab == 0 && (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e))) {
         TextField_Input(g_name, e);
         TextArea_Input(g_desc, e);
         g_err.clear();

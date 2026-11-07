@@ -13,6 +13,7 @@ namespace {
     const float kLine = 1.5f;      // толщина контура
     const float kRound = 10.f;     // скругление углов
     const float kTextScale = 2.0f;
+    const float kLabelPad = 12.f;   // отступ подписи от краёв кнопки
 
     Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | (Uint32(kB) << 16) | (Uint32(kG) << 8) | kR; }
 
@@ -71,11 +72,10 @@ void TextButton_Draw(SDL_Renderer* r, TextButton& b) {
     SDL_RenderTexture(r, b.core, nullptr, &dst);
 
     // Unicode-подпись по центру кнопки (в том числе кириллица).
+    // Подпись всегда внутри кнопки: сначала мельче (16 -> 8 px), потом обрезаем с "..".
     const std::string label = b.label ? b.label : "";
-    const int fontHeight = static_cast<int>(8.f * kTextScale);
-    const float textW = Utf8TextWidth(label, fontHeight);
-    DrawUtf8Text(r, label, b.x + (b.w - textW) * 0.5f,
-        b.y + (b.h - fontHeight) * 0.5f, fontHeight,
+    DrawUtf8TextFit(r, label, b.x + kLabelPad, b.y + b.h * 0.5f, b.w - kLabelPad * 2.f,
+        static_cast<int>(8.f * kTextScale), true,
         b.hovered ? 200 : kR, b.hovered ? 240 : kG, 255, 255);
 }
 

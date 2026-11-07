@@ -200,6 +200,12 @@
     <ClInclude Include="UserStore.h" />
     <ClInclude Include="WindowFrame.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="FONT_SETUP.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="sprite.bmp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

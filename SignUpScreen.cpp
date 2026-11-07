@@ -205,7 +205,7 @@ SignUpResult SignUp_Handle(const SDL_Event& e) {
 
     // ввод символов; при правке убираем сообщение об ошибке
     const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
-    if (e.type == SDL_EVENT_TEXT_INPUT || backspace) {
+    if (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e)) {
         for (auto& f : g_f) TextField_Input(f, e);
         g_err.clear();
     }

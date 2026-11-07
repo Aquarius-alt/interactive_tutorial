@@ -259,7 +259,7 @@ void Theory_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         if (!g_err.empty()) {
             const std::string shownError = UiMessage(g_err);
-            DrawUtf8Text(r, shownError, ix, infoY, 12, 255, 90, 90, 255);
+            DrawUtf8TextFit(r, shownError, ix, infoY + 4.f, std::max(16.f, iw - 90.f), 8, false, 255, 90, 90, 255);
         }
         else {
             const std::string s = AttachSummary(maxChars);
@@ -322,7 +322,7 @@ TheoryResult Theory_Handle(const SDL_Event& e) {
 
     // ввод символов; при правке убираем сообщение об ошибке
     const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
-    if (e.type == SDL_EVENT_TEXT_INPUT || backspace) {
+    if (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e)) {
         TextField_Input(g_title, e);
         TextArea_Input(g_body, e);
         if (g_withAnswers) TextField_Input(g_answers, e);

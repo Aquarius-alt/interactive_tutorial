@@ -4,6 +4,7 @@
 #endif
 #include <windows.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <string>
@@ -141,10 +142,130 @@ void Utf8AppendLimited(std::string& target, const char* input, size_t maxCharact
     }
 }
 
+int FitFontHeight(const std::string& text, float maxWidth, int preferred) {
+    int font = NormalizeTextFontHeight(preferred);
+    while (font > 8 && Utf8TextWidth(text, font) > maxWidth) font -= 8;
+    return font;
+}
+
+std::string Utf8Fit(const std::string& text, float maxWidth, int fontHeight) {
+    const float cell = static_cast<float>(NormalizeTextFontHeight(fontHeight));
+    const size_t fit = static_cast<size_t>(std::max(1.f, std::floor(maxWidth / cell)));
+    const size_t count = Utf8Count(text);
+    if (count <= fit) return text;
+    const size_t keep = fit > 2 ? fit - 2 : fit;
+    size_t pos = 0, left = keep;
+    while (pos < text.size() && left) {
+        const unsigned char c = static_cast<unsigned char>(text[pos]);
+        pos += c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4));
+        --left;
+    }
+    std::string out = text.substr(0, std::min(pos, text.size()));
+    if (fit > 2) out += "..";
+    return out;
+}
+
+void DrawUtf8TextFit(SDL_Renderer* r, const std::string& text, float boxX, float centerY, float boxW,
+    int preferredFont, bool centered, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+    if (text.empty()) return;
+    const float avail = std::max(8.f, boxW);
+    const int font = FitFontHeight(text, avail, preferredFont);
+    const std::string shown = Utf8Fit(text, avail, font);
+    const float width = Utf8TextWidth(shown, font);
+    const float x = centered ? boxX + (boxW - width) * 0.5f : boxX;
+    DrawUtf8Text(r, shown, x, centerY - font * 0.5f, font, red, green, blue, alpha);
+}
+
+bool IsPasteEvent(const SDL_Event& e) {
+    if (e.type != SDL_EVENT_KEY_DOWN) return false;
+    // scancode, not keycode: with a Russian layout the V key produces a Cyrillic keycode
+    if (e.key.scancode == SDL_SCANCODE_V && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI))) return true;
+    if (e.key.scancode == SDL_SCANCODE_INSERT && (e.key.mod & SDL_KMOD_SHIFT)) return true;
+    return false;
+}
+
+bool IsCopyEvent(const SDL_Event& e) {
+    if (e.type != SDL_EVENT_KEY_DOWN) return false;
+    if (e.key.scancode == SDL_SCANCODE_C && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI))) return true;
+    if (e.key.scancode == SDL_SCANCODE_INSERT && (e.key.mod & SDL_KMOD_CTRL)) return true;
+    return false;
+}
+
+bool IsUndoEvent(const SDL_Event& e) {
+    return e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_Z &&
+        (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) && !(e.key.mod & SDL_KMOD_SHIFT);
+}
+
+bool IsEditShortcut(const SDL_Event& e) {
+    return IsPasteEvent(e) || IsCopyEvent(e) || IsUndoEvent(e);
+}
+
+void CopyText(const std::string& text) {
+    if (!text.empty()) SDL_SetClipboardText(text.c_str());
+}
+
+void UndoBefore(UndoHistory& h, const std::string& text, int kind) {
+    const Uint64 now = SDL_GetTicks();
+    if (text != h.last) {                         // text was changed from outside (e.g. Enter -> newline)
+        h.stack.push_back(h.last);
+        h.stack.push_back(text);
+    }
+    else if (!((kind == 1 || kind == 2) && kind == h.kind && now - h.time < 1000)) {
+        h.stack.push_back(text);                  // new undo step
+    }
+    h.kind = kind;
+    h.time = now;
+    if (h.stack.size() > 100) h.stack.erase(h.stack.begin());
+}
+
+void UndoCommit(UndoHistory& h, const std::string& text) {
+    if (!h.stack.empty() && h.stack.back() == text) h.stack.pop_back();   // nothing actually changed
+    h.last = text;
+}
+
+bool UndoApply(UndoHistory& h, std::string& text) {
+    if (text != h.last) {                         // revert an outside edit first
+        text = h.last;
+        h.kind = 0;
+        return true;
+    }
+    if (h.stack.empty()) return false;
+    text = h.stack.back();
+    h.stack.pop_back();
+    h.last = text;
+    h.kind = 0;
+    return true;
+}
+
+bool Utf8PasteLimited(std::string& target, size_t maxCharacters, bool multiline) {
+    if (!SDL_HasClipboardText()) return true;
+    char* raw = SDL_GetClipboardText();
+    if (!raw) return true;
+    std::string clean;
+    clean.reserve(std::strlen(raw));
+    for (const char* p = raw; *p; ++p) {
+        const char c = *p;
+        if (c == '\r') {
+            if (p[1] == '\n') continue;          // CRLF -> one line break
+            clean.push_back(multiline ? '\n' : ' ');
+        }
+        else if (c == '\n') clean.push_back(multiline ? '\n' : ' ');
+        else if (c == '\t') clean.push_back(' ');
+        else if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) continue;   // other control characters
+        else clean.push_back(c);
+    }
+    SDL_free(raw);
+    Utf8AppendLimited(target, clean.c_str(), maxCharacters);
+    return true;
+}
+
 void DrawCenteredText(SDL_Renderer* r, const char* text, int w, int h,
     float scale, float yOffset, Uint8 red, Uint8 green, Uint8 blue) {
-    const std::string value = text ? text : "";
-    const int fontHeight = NormalizeTextFontHeight(std::max(8, static_cast<int>(8.0f * scale)));
+    std::string value = text ? text : "";
+    const float avail = std::max(16.f, static_cast<float>(w) - 24.f);          // поля по бокам окна
+    const int fontHeight = FitFontHeight(value, avail,
+        NormalizeTextFontHeight(std::max(8, static_cast<int>(8.0f * scale))));
+    value = Utf8Fit(value, avail, fontHeight);
     const float approxWidth = Utf8TextWidth(value, fontHeight);
     DrawUtf8Text(r, value, (static_cast<float>(w) - approxWidth) * 0.5f,
         (static_cast<float>(h) - fontHeight) * 0.5f + yOffset,

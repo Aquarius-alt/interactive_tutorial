@@ -1,5 +1,6 @@
 #include "MainScreen.h"
 #include "Avatar.h"
+#include "ConfirmDialog.h"
 #include "TextButton.h"
 #include "Text.h"
 #include "RepoStore.h"
@@ -32,7 +33,7 @@ namespace {
     // Колонок и видимых рядов столько, сколько влезает в окно; лишние ряды листаются колесом
     // или ползунком справа. Размер карточки фиксированный, как у "+".
     const float kCardW = 150.f, kCardH = 176.f, kGap = 16.f;
-    const float kGridX = 20.f, kGridY = 84.f, kBarGutter = 18.f;
+    const float kGridX = 20.f, kGridY = 84.f, kBarGutter = 32.f;   // справа оставлен запас: внизу стоит шестерня настроек
     const float kCardPad = 16.f;
 
     struct RepoCard {
@@ -46,7 +47,8 @@ namespace {
     TextButton            g_card{ 0, 0, kCardW, kCardH, "" };     // рамка карточки (рисуется для каждой)
 
     // ---------- меню карточки (ЛКМ по репозиторию): DELETE, EDIT, OPEN ----------
-    const float kCmItemW = 120.f, kCmItemH = 34.f, kCmGap = 8.f, kCmPad = 8.f;
+    const float kCmItemW = 140.f, kCmItemH = 34.f, kCmGap = 8.f, kCmPad = 8.f;
+    std::string g_delDir;                        // репозиторий, ожидающий подтверждения удаления (пусто = нет)
     int         g_cmIdx = -1;                    // у какой карточки открыто меню (-1 = закрыто)
     float       g_cmX = 0.f, g_cmY = 0.f;        // куда кликнули: левый верхний угол меню
     bool        g_cmLaid = false;                // true после отрисовки (до неё позиции пунктов неверны)
@@ -189,20 +191,21 @@ namespace {
         return std::min(pos, value.size());
     }
 
-    void DrawLeftText(SDL_Renderer* r, std::string s, float x, float cy, float maxW) {
-        int font = 16;
-        size_t fit = static_cast<size_t>(std::max(1.f, maxW / 9.f));
-        if (Utf8Count(s) > fit) {
-            size_t cut = Utf8ByteAt(s, fit > 2 ? fit - 2 : fit);
-            s.resize(cut);
-            if (fit > 2) s += "..";
-        }
-        DrawUtf8Text(r, s, x, cy - font * 0.5f, font, kR, kG, kB, 255);
+    // Раньше ширина символа считалась как 9 px при реальных 16 px, и длинный логин заезжал на кнопки окна.
+    void DrawLeftText(SDL_Renderer* r, const std::string& s, float x, float cy, float maxW) {
+        DrawUtf8TextFit(r, s, x, cy, maxW, 16, false, kR, kG, kB, 255);
     }
 
-    void DrawCenterLabel(SDL_Renderer* r, const char* value, float cx, float cy, float scale, bool hovered) {
+    // maxW > 0: подпись подгоняется под эту ширину (мельче, затем с "..")
+    void DrawCenterLabel(SDL_Renderer* r, const char* value, float cx, float cy, float scale, bool hovered,
+        float maxW = 0.f) {
         const std::string s = value ? value : "";
         const int font = std::max(10, static_cast<int>(8.f * scale));
+        if (maxW > 0.f) {
+            DrawUtf8TextFit(r, s, cx - maxW * 0.5f, cy, maxW, font, true,
+                hovered ? 200 : kR, hovered ? 240 : kG, 255, 255);
+            return;
+        }
         const float width = Utf8TextWidth(s, font);
         DrawUtf8Text(r, s, cx - width * 0.5f, cy - font * 0.5f, font,
             hovered ? 200 : kR, hovered ? 240 : kG, 255, 255);
@@ -267,6 +270,23 @@ namespace {
         DrawCardName(r, c.name, x + kCardW * 0.5f, box.y + S + 12.f, kCardW - 20.f);
     }
 
+    // Заливка скруглённого прямоугольника (по строкам): закрывает всё под рамкой вплоть до самого края,
+    // но не торчит за скруглёнными углами. Нужна, чтобы карточка под списком не просвечивала.
+    void FillRounded(SDL_Renderer* r, const SDL_FRect& rc, float rad) {
+        const int rows = int(std::ceil(rc.h));
+        for (int i = 0; i < rows; ++i) {
+            const float fromEdge = std::min(float(i) + 0.5f, rc.h - float(i) - 0.5f);
+            float inset = 0.f;
+            if (fromEdge < rad) {
+                const float dy = rad - fromEdge;
+                inset = rad - std::sqrt(std::max(0.f, rad * rad - dy * dy));
+            }
+            const SDL_FRect line = { std::floor(rc.x + inset), std::floor(rc.y) + float(i),
+                                     std::ceil(rc.w - 2.f * inset), 1.f };
+            SDL_RenderFillRect(r, &line);
+        }
+    }
+
     void FillR(SDL_Renderer* r, float x, float y, float w, float h) {
         const SDL_FRect f = { std::floor(x), std::floor(y), std::ceil(w), std::ceil(h) };
         SDL_RenderFillRect(r, &f);
@@ -316,6 +336,8 @@ void Main_Open(const std::string& login) {
     g_login = login;
     g_open = false;
     g_add = false;
+    g_delDir.clear();
+    Confirm_Close();
     g_avHover = false;
     g_profile.hovered = g_logout.hovered = g_plus.hovered = false;
     g_import.hovered = g_create.hovered = false;
@@ -337,6 +359,8 @@ void Main_Close() {
     g_open = false;
     g_add = false;
     g_drag = false;
+    g_delDir.clear();
+    Confirm_Close();
     g_chosenDir.clear();
     FreeRepos();
 }
@@ -379,7 +403,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         const int first = g_scrollRow * g_cols;
         g_plusVisible = false;
         g_vis.clear();
-        const bool blocked = g_open || g_add || g_drag;          // список аватара / окно "+" / ползунок: карточки не подсвечиваем
+        const bool blocked = g_open || g_add || g_drag || Confirm_IsOpen();          // список аватара / окно "+" / ползунок: карточки не подсвечиваем
         for (int slot = first; slot < first + g_cols * g_visRows && slot <= n; ++slot) {
             const int rel = slot - first;
             const float sx = gx + float(rel % g_cols) * (kCardW + kGap);
@@ -405,6 +429,10 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         g_hasBar = MaxScroll() > 0;
         if (g_hasBar) {
             g_track = { g_gridRect.x + g_gridRect.w + 8.f, gy, 6.f, g_gridRect.h };
+            // дорожка не заезжает на шестерню настроек в правом нижнем углу
+            const float gearTop = float(h) - 56.f;
+            if (g_track.x + g_track.w + 6.f > float(w) - 52.f && gearTop - g_track.y >= 60.f && g_track.y + g_track.h > gearTop)
+                g_track.h = gearTop - g_track.y;
             const float thumbH = std::max(28.f, g_track.h * float(g_visRows) / float(TotalRows()));
             const float travel = g_track.h - thumbH;
             g_thumb = { g_track.x, g_track.y + travel * float(g_scrollRow) / float(MaxScroll()), g_track.w, thumbH };
@@ -462,11 +490,10 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         g_panel.y = kAvY + kAvD + 10.f;
         g_panel.hovered = false;
 
-        // фон списка (с отступом, чтобы не торчал за скруглёнными углами рамки)
+        // фон списка: по форме скруглённой рамки до самого края (раньше отступ в 4 px пропускал угол карточки под списком)
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, 22, 24, 30, 255);
-        const SDL_FRect bg = { g_panel.x + 4, g_panel.y + 4, g_panel.w - 8, g_panel.h - 8 };
-        SDL_RenderFillRect(r, &bg);
+        FillRounded(r, { g_panel.x + 1.f, g_panel.y + 1.f, g_panel.w - 2.f, g_panel.h - 2.f }, 9.f);
         TextButton_Draw(r, g_panel);
 
         g_profile.x = g_logout.x = g_panel.x + 10.f;
@@ -516,12 +543,16 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         const float labelScale = (S >= 100.f) ? 2.0f : 1.0f;
         const float labelCy = g_import.y + S + kAddLabelH * 0.5f + 2.f;
-        DrawCenterLabel(r, UiText("IMPORT", "ИМПОРТ"), g_import.x + S * 0.5f, labelCy, labelScale, g_import.hovered);
-        DrawCenterLabel(r, UiText("CREATE", "СОЗДАТЬ"), g_create.x + S * 0.5f, labelCy, labelScale, g_create.hovered);
+        const float labelMaxW = S + kAddGap - 8.f;                 // не заходит на подпись соседней кнопки
+        DrawCenterLabel(r, UiText("IMPORT", "ИМПОРТ"), g_import.x + S * 0.5f, labelCy, labelScale, g_import.hovered, labelMaxW);
+        DrawCenterLabel(r, UiText("CREATE", "СОЗДАТЬ"), g_create.x + S * 0.5f, labelCy, labelScale, g_create.hovered, labelMaxW);
 
         // всё окно без перетаскивания
         nd[ndCount++] = { int(px), int(py), int(pw), int(ph) };
     }
+
+    // окно "ARE YOU SURE?" перед удалением репозитория: поверх всего остального
+    Confirm_Draw(r, w, h, nd, ndCount);
 }
 
 MainResult Main_Handle(const SDL_Event& e) {
@@ -548,6 +579,26 @@ MainResult Main_Handle(const SDL_Event& e) {
 
     if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) { g_mx = g_my = -1.f; }
 
+    // окно подтверждения удаления: пока открыто, все события идут только ему
+    if (Confirm_IsOpen()) {
+        g_avHover = false;
+        g_plus.hovered = false;
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) g_drag = false;
+
+        const ConfirmResult cr = Confirm_Handle(e);
+        if (cr != ConfirmResult::None) {                      // Yes или No: окно уже закрылось
+            if (cr == ConfirmResult::Yes && !g_delDir.empty()) {
+                RepoStore_Delete(g_delDir);
+                const int keep = g_scrollRow;                 // после удаления остаёмся на том же месте списка
+                LoadRepos();
+                g_scrollRow = keep;
+                ClampScroll();
+            }
+            g_delDir.clear();
+        }
+        return MainResult::None;
+    }
+
     // меню карточки: пока открыто, первым получает клики и Esc
     if (g_cmIdx >= 0) {
         if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.key == SDLK_ESCAPE) {
@@ -558,11 +609,8 @@ MainResult Main_Handle(const SDL_Event& e) {
             const std::string dir = g_repos[size_t(g_cmIdx)].dir;
             if (TextButton_Handle(g_cmDelete, e)) {
                 CloseCardMenu();
-                RepoStore_Delete(dir);
-                const int keep = g_scrollRow;                    // после удаления остаёмся на том же месте списка
-                LoadRepos();
-                g_scrollRow = keep;
-                ClampScroll();
+                g_delDir = dir;                                  // удалим только после "YES" в окне подтверждения
+                Confirm_Open();
                 return MainResult::None;
             }
             if (TextButton_Handle(g_cmEdit, e)) {
@@ -661,6 +709,10 @@ MainResult Main_Handle(const SDL_Event& e) {
     return MainResult::None;
 }
 
+bool Main_IsModalOpen() {
+    return g_add || Confirm_IsOpen();
+}
+
 void Main_Destroy() {
     TextButton_Destroy(g_panel);
     TextButton_Destroy(g_profile);
@@ -670,6 +722,7 @@ void Main_Destroy() {
     TextButton_Destroy(g_cmDelete);
     TextButton_Destroy(g_cmEdit);
     TextButton_Destroy(g_cmOpen);
+    Confirm_Destroy();
     FreeRepos();
     TextButton_Destroy(g_addPanel);
     TextButton_Destroy(g_import);

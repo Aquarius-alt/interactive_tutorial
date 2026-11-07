@@ -1,14 +1,9 @@
-﻿  Avatar.cpp
-  Border.cpp
-  Button.cpp
-  ConfirmDialog.cpp
+﻿  ConfirmDialog.cpp
   CreateScreen.cpp
-  main.cpp
   MainScreen.cpp
   OpenedScreen.cpp
   ProfileScreen.cpp
   RecoverDialog.cpp
-  RepoStore.cpp
   SaveOverlay.cpp
   SignInScreen.cpp
   SignUpScreen.cpp
@@ -17,10 +12,7 @@
   TextButton.cpp
   TextField.cpp
   TheoryDialog.cpp
-  UserStore.cpp
-  Создание кода...
-  Компиляция...
-  WindowFrame.cpp
+  main.cpp
   Создание кода...
   test.vcxproj -> C:\Users\aghan1m666\source\repos\test\x64\Debug\test.exe
   Скопировано файлов:         1.

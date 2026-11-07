@@ -162,7 +162,8 @@ namespace {
         if (!result) std::snprintf(buf, sizeof buf, UiRussianFlag() ? "СОХРАНЕНИЕ %3d%%" : "SAVING %3d%%", int(g_p * 100.f));
         else if (g_ok) std::snprintf(buf, sizeof buf, UiText("SAVED 100%%", "СОХРАНЕНО 100%%"));
         else std::snprintf(buf, sizeof buf, UiText("SAVE FAILED", "ОШИБКА СОХРАНЕНИЯ"));
-        DrawCenteredText(r, buf, W, H, 2.0f, (rowY + 14.f) - H * 0.5f, ar, ag, ab);
+        DrawUtf8TextFit(r, buf, lb.x + lb.w + 12.f, rowY + 14.f, float(W) - 2.f * (lb.x + lb.w + 12.f),
+            16, true, ar, ag, ab, 255);                    // между двумя рамками подписей
 
         // лёгкие «строки развёртки»
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
