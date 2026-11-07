@@ -4,12 +4,19 @@
 #include "Text.h"
 static std::vector<UndoHistory> g_answerUndo;   // история Ctrl+Z для каждого ответа
 #include "Localization.h"
+#include "Level.h"
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <cctype>
+#include <iterator>
+#include <random>
+#include <set>
 #include <vector>
 #include <map>
 #ifndef NOMINMAX
@@ -23,20 +30,40 @@ static std::vector<UndoHistory> g_answerUndo;   // история Ctrl+Z для 
 namespace {
 struct Hit { SDL_FRect rc{}; int type=0, index=-1, sub=-1; };   // sub = номер вложения (type 7/8)
 std::string g_dir;
+std::string g_login;                          // кому зачисляется опыт за выполнение репозитория
+int g_mainXp=0, g_subjectXp=0; std::string g_subjectTag;                               // основной опыт за выполнение (из repo.json)
+void TryAward();                              // определена ниже, после AnswerState
 std::vector<TheoryItem> g_theory, g_tests;
 std::vector<bool> g_done;
-std::vector<std::string> g_answers;
+std::vector<std::string> g_answers;          // ответы: по одному на каждый вопрос каждого теста (плоский список)
+std::vector<size_t> g_qOff;                  // g_qOff[t] = номер в g_answers первого вопроса теста t
+size_t g_qTotal=0;                           // всего вопросов во всех тестах
+std::vector<bool> g_qOpen;                   // раскрыт ли вопрос (виден ли под ним ответ)
+std::vector<std::string> g_qCorrect;         // верный ответ на каждый вопрос (для галочки; на экране не показывается)
 std::vector<bool> g_noteOpen, g_testOpen;
 bool g_theoryOpen=true, g_testsOpen=true, g_answerFocus=false, g_dirty=false;
 int g_scroll=0, g_answerIndex=-1;
 std::vector<Hit> g_hits;
 TextButton g_back{20,20,110,38,"BACK"}, g_save{0,0,130,40,"SAVE"};
-const Uint8 R=90,G=200,B=255;
+const Uint8 R=96,G=228,B=232;
+// ---------- мини-игры ----------
+// Игра лежит в games\001_<имя>\ (main.py + manifest.json). Запуск: python main.py --data data.json --result result.json.
+// data.json приложение пишет перед запуском (то, что игра заказала в manifest "uses": tests / notes),
+// result.json игра пишет при выходе: {"score":7,"max":10,"completed":true}.
+struct GameResult { int score=0, max=0; bool completed=false, played=false; };   // лучший результат по игре
+std::vector<TheoryItem> g_games;
+std::vector<GameResult> g_gameRes;
+bool g_gamesOpen=true;
+HANDLE g_proc=nullptr; int g_procGame=-1;         // запущенная сейчас игра
+Uint64 g_msgUntil=0;                             // когда убрать короткое сообщение (0 = не убирать)
+std::string g_gameMsg;                            // строка состояния под заголовком (пусто = нечего показывать)
 std::filesystem::path RepoPath(){ return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(g_dir.data()), g_dir.size())); }
 std::string Hex(const std::string& s){ static const char* h="0123456789ABCDEF"; std::string o; for(unsigned char c:s){o+=h[c>>4];o+=h[c&15];} return o; }
 std::string Unhex(const std::string& s){ std::string o; for(size_t i=0;i+1<s.size();i+=2){ auto v=[](char c){return c<='9'?c-'0':(c<='F'?c-'A'+10:c-'a'+10);}; o.push_back(char((v(s[i])<<4)|v(s[i+1]))); } return o; }
-void Save(){ std::ofstream f(RepoPath()/"progress.dat",std::ios::binary|std::ios::trunc); if(!f)return; for(size_t i=0;i<g_done.size();++i) f<<"N "<<i<<" "<<(g_done[i]?1:0)<<"\n"; for(size_t i=0;i<g_answers.size();++i) f<<"A "<<i<<" "<<(g_answers[i].empty()?"-":Hex(g_answers[i]))<<"\n"; g_dirty=false; }
-void Load(){ g_done.assign(g_theory.size(),false); g_answers.assign(g_tests.size(),""); std::ifstream f(RepoPath()/"progress.dat",std::ios::binary); std::string type,val; size_t i; while(f>>type>>i>>val){ if(type=="N"&&i<g_done.size())g_done[i]=(val=="1"); else if(type=="A"&&i<g_answers.size())g_answers[i]=(val=="-"?std::string():Unhex(val)); } }
+bool Save(){ std::ofstream f(RepoPath()/"progress.dat",std::ios::binary|std::ios::trunc); if(!f)return false; for(size_t i=0;i<g_done.size();++i) f<<"N "<<i<<" "<<(g_done[i]?1:0)<<"\n"; for(size_t t=0;t<g_tests.size()&&t<g_qOff.size();++t) for(size_t q=0;q<g_tests[t].questions.size();++q){ const size_t k=g_qOff[t]+q; if(k>=g_answers.size())break; f<<"Q "<<t<<" "<<q<<" "<<(g_answers[k].empty()?"-":Hex(g_answers[k]))<<"\n"; } for(size_t i=0;i<g_gameRes.size();++i) if(g_gameRes[i].played) f<<"G "<<i<<" "<<g_gameRes[i].score<<" "<<g_gameRes[i].max<<" "<<(g_gameRes[i].completed?1:0)<<"\n"; f.flush(); if(!f.good())return false; g_dirty=false; TryAward(); return true; }
+void Load(){ g_gameRes.assign(g_games.size(),GameResult{}); g_done.assign(g_theory.size(),false); g_answers.assign(g_qTotal,""); std::ifstream f(RepoPath()/"progress.dat",std::ios::binary); std::string type,val; while(f>>type){ if(type=="N"){ size_t i; if(!(f>>i>>val))break; if(i<g_done.size())g_done[i]=(val=="1"); } else if(type=="A"){ size_t t; if(!(f>>t>>val))break; if(t<g_tests.size()&&t<g_qOff.size()&&!g_tests[t].questions.empty()) g_answers[g_qOff[t]]=(val=="-"?std::string():Unhex(val)); } else if(type=="G"){ size_t i; int sc,mx,cp; if(!(f>>i>>sc>>mx>>cp))break; if(i<g_gameRes.size()) g_gameRes[i]={sc,mx,cp!=0,true}; } else if(type=="Q"){ size_t t,q; if(!(f>>t>>q>>val))break; if(t<g_tests.size()&&t<g_qOff.size()&&q<g_tests[t].questions.size()) g_answers[g_qOff[t]+q]=(val=="-"?std::string():Unhex(val)); } else break; } }
+// Тест из старой версии (один текст + одна строка ответов) показываем как один вопрос; считаем номера ответов.
+void NormalizeTests(){ g_qOff.clear(); g_qCorrect.clear(); g_qTotal=0; for(TheoryItem& t:g_tests){ if(t.questions.empty()&&!t.content.empty()) t.questions.push_back({t.content,t.answers}); g_qOff.push_back(g_qTotal); g_qTotal+=t.questions.size(); for(const TestQuestion& q:t.questions) g_qCorrect.push_back(q.answers); } g_qOpen.assign(g_qTotal,true); }
 // OPENED использует тот же Press Start 2P и Unicode-рендеринг Windows (GDI),
 // что и остальные экраны приложения.
 struct CachedText { SDL_Texture* texture=nullptr; int w=0, h=0; };
@@ -150,7 +177,51 @@ void Text(SDL_Renderer* r, const std::string& sIn, float x, float y,
     SDL_FRect dst{x, y, static_cast<float>(it->second.w), static_cast<float>(it->second.h)};
     SDL_RenderTexture(r, it->second.texture, nullptr, &dst);
 }
-void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?45:22,hot?48:24,hot?58:30,255); SDL_RenderFillRect(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); SDL_RenderRect(r,&q); }
+// ---------- проверка ответа ----------
+// Сравнение без учёта регистра и лишних пробелов (работает и для кириллицы).
+std::wstring NormAnswer(const std::string& in){
+    const std::wstring w=Utf8ToWide(in); std::wstring o; bool sp=false;
+    for(wchar_t c:w){
+        if(c==L' '||c==L'\t'||c==L'\n'||c==L'\r'){ sp=!o.empty(); continue; }
+        if(sp){ o.push_back(L' '); sp=false; }
+        o.push_back(static_cast<wchar_t>(::towlower(c)));
+    }
+    return o;
+}
+// 1 = верно, 0 = неверно, -1 = нечего проверять (ответ пуст или верный ответ в тесте не задан).
+// В строке верных ответов можно перечислить несколько допустимых через ; или |
+int AnswerState(const std::string& user,const std::string& correct){
+    const std::wstring u=NormAnswer(user), c=NormAnswer(correct);
+    if(u.empty()||c.empty()) return -1;
+    if(u==c) return 1;
+    std::wstring part;
+    for(size_t i=0;i<=c.size();++i){
+        if(i==c.size()||c[i]==L';'||c[i]==L'|'){
+            size_t b=0,e=part.size();
+            while(b<e&&part[b]==L' ')++b;
+            while(e>b&&part[e-1]==L' ')--e;
+            if(e>b&&part.compare(b,e-b,u)==0) return 1;
+            part.clear();
+        } else part.push_back(c[i]);
+    }
+    return 0;
+}
+// галочка (верно) или крестик (неверно) справа в поле ответа
+void DrawVerdict(SDL_Renderer*r,float cx,float cy,bool ok){
+    SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
+    if(ok) SDL_SetRenderDrawColor(r,90,230,120,255); else SDL_SetRenderDrawColor(r,255,95,95,255);
+    for(int t=0;t<3;++t){                                   // три сдвинутые линии = толщина ~3 px
+        const float d=float(t)-1.f;
+        if(ok){
+            SDL_RenderLine(r,cx-9.f,cy+d,cx-3.f,cy+7.f+d);
+            SDL_RenderLine(r,cx-3.f,cy+7.f+d,cx+10.f,cy-8.f+d);
+        } else {
+            SDL_RenderLine(r,cx-7.f,cy-7.f+d,cx+7.f,cy+7.f+d);
+            SDL_RenderLine(r,cx-7.f,cy+7.f+d,cx+7.f,cy-7.f+d);
+        }
+    }
+}
+void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?52:26,hot?22:12,hot?30:18,255); SDL_RenderFillRect(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); SDL_RenderRect(r,&q); }
 void AddHit(float x,float y,float w,float h,int type,int idx,int sub=-1){g_hits.push_back({{x,y,w,h},type,idx,sub});}
 bool In(const SDL_FRect&q,float x,float y){return x>=q.x&&x<=q.x+q.w&&y>=q.y&&y<=q.y+q.h;}
 
@@ -241,13 +312,254 @@ void OpenAttachment(const std::string& path){
     OpenExternal(path);                                  // не картинка (или формат не читается): системная программа
 }
 }
-void Opened_Open(SDL_Window* window,const std::string& dir){ g_dir=dir; CreateData d; g_theory.clear();g_tests.clear(); if(RepoStore_Load(dir,d)){g_theory=d.theory;g_tests=d.tests;} g_noteOpen.assign(g_theory.size(),false);g_testOpen.assign(g_tests.size(),false);g_theoryOpen=true;g_testsOpen=true;g_answerFocus=false;g_answerIndex=-1;g_scroll=0;g_answerUndo.clear();g_dirty=false;Load(); SDL_StartTextInput(window); }
-void Opened_Close(SDL_Window* window){ FreeView(); g_drag=false; if(g_dirty)Save(); SDL_StopTextInput(window);g_dir.clear();g_theory.clear();g_tests.clear();g_done.clear();g_answers.clear();g_hits.clear();g_answerFocus=false; }
+
+// ---------- запуск мини-игр ----------
+namespace {
+std::string JsonEsc(const std::string& in){
+    std::string o; o.reserve(in.size()+8);
+    for(unsigned char c:in){
+        switch(c){
+            case '"': o+="\\\""; break; case '\\': o+="\\\\"; break;
+            case '\n': o+="\\n"; break; case '\r': break; case '\t': o+="\\t"; break;
+            default: if(c<0x20){ char b[8]; std::snprintf(b,sizeof b,"\\u%04x",c); o+=b; } else o.push_back(char(c));
+        }
+    }
+    return o;
+}
+std::string ReadAll(const std::filesystem::path& p){ std::ifstream f(p,std::ios::binary); return std::string((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>()); }
+// есть ли ключ в массиве "uses" манифеста игры
+bool UsesHas(const std::string& manifest,const char* a,const char* b=nullptr){
+    const size_t k=manifest.find("\"uses\""); if(k==std::string::npos) return false;
+    const size_t l=manifest.find('[',k), r=l==std::string::npos?l:manifest.find(']',l); if(r==std::string::npos) return false;
+    const std::string arr=manifest.substr(l,r-l);
+    return arr.find(std::string("\"")+a+"\"")!=std::string::npos || (b&&arr.find(std::string("\"")+b+"\"")!=std::string::npos);
+}
+// число после "key": в простом JSON (для result.json)
+bool JsonInt(const std::string& j,const char* key,int& out){
+    const size_t k=j.find(std::string("\"")+key+"\""); if(k==std::string::npos) return false;
+    size_t p=j.find(':',k); if(p==std::string::npos) return false; ++p;
+    while(p<j.size()&&(j[p]==' '||j[p]=='\t'||j[p]=='\n'||j[p]=='\r')) ++p;
+    char* end=nullptr; const long v=std::strtol(j.c_str()+p,&end,10); if(end==j.c_str()+p) return false;
+    out=int(v); return true;
+}
+bool JsonBool(const std::string& j,const char* key,bool& out){
+    const size_t k=j.find(std::string("\"")+key+"\""); if(k==std::string::npos) return false;
+    const size_t p=j.find(':',k); if(p==std::string::npos) return false;
+    const size_t t=j.find("true",p), f=j.find("false",p);
+    if(t!=std::string::npos&&(f==std::string::npos||t<f)){ out=true; return true; }
+    if(f!=std::string::npos){ out=false; return true; }
+    return false;
+}
+// допустимые ответы вопроса: строка "a; b | c" -> ["a","b","c"]
+std::vector<std::string> SplitAnswers(const std::string& s){
+    std::vector<std::string> v; std::string part;
+    auto flush=[&](){ size_t b=0,e=part.size(); while(b<e&&std::isspace((unsigned char)part[b]))++b; while(e>b&&std::isspace((unsigned char)part[e-1]))--e; if(e>b) v.push_back(part.substr(b,e-b)); part.clear(); };
+    for(char c:s){ if(c==';'||c=='|') flush(); else part.push_back(c); }
+    flush(); return v;
+}
+// data.json: только то, что игра заказала в uses
+std::string BuildGameData(const std::string& manifest){
+    std::string j="{\n  \"repo\": \""+JsonEsc(g_dir.substr(g_dir.find_last_of("/\\")+1))+"\"";
+    if(UsesHas(manifest,"tests")){
+        j+=",\n  \"tests\": [";
+        // Вариантов ответа в тестах приложения нет (ответ вводится текстом), поэтому приложение само
+        // собирает их: верный ответ + до трёх верных ответов других вопросов. answer = номер верного варианта.
+        std::vector<std::string> pool;
+        for(size_t t=0;t<g_tests.size();++t) for(const TestQuestion& q:g_tests[t].questions){
+            const std::vector<std::string> a=SplitAnswers(q.answers); if(!a.empty()&&!q.text.empty()) pool.push_back(a[0]);
+        }
+        static std::mt19937 rng{std::random_device{}()};
+        bool first=true;
+        for(size_t t=0;t<g_tests.size();++t) for(const TestQuestion& q:g_tests[t].questions){
+            const std::vector<std::string> ans=SplitAnswers(q.answers);
+            if(ans.empty()||q.text.empty()) continue;        // вопрос без верного ответа игре не нужен
+            std::vector<std::string> others; std::set<std::wstring> seen{NormAnswer(ans[0])};
+            for(const std::string& a:pool) if(seen.insert(NormAnswer(a)).second) others.push_back(a);
+            std::shuffle(others.begin(),others.end(),rng); if(others.size()>3) others.resize(3);
+            std::vector<std::string> opts{ans[0]}; opts.insert(opts.end(),others.begin(),others.end());
+            while(opts.size()<2) opts.push_back("Нет верного ответа");
+            std::shuffle(opts.begin(),opts.end(),rng);
+            size_t right=0; for(size_t k=0;k<opts.size();++k) if(opts[k]==ans[0]){ right=k; break; }
+            j+=first?"\n    ":",\n    "; first=false;
+            j+="{\"test\": \""+JsonEsc(g_tests[t].title)+"\", \"question\": \""+JsonEsc(q.text)+"\", \"options\": [";
+            for(size_t k=0;k<opts.size();++k){ if(k) j+=", "; j+="\""+JsonEsc(opts[k])+"\""; }
+            j+="], \"answer\": "+std::to_string(right)+", \"answer_text\": \""+JsonEsc(ans[0])+"\", \"answers\": [";
+            for(size_t a=0;a<ans.size();++a){ if(a) j+=", "; j+="\""+JsonEsc(ans[a])+"\""; }
+            j+="]}";
+        }
+        j+="\n  ]";
+    }
+    if(UsesHas(manifest,"notes","theory")){
+        j+=",\n  \"notes\": [";
+        for(size_t i=0;i<g_theory.size();++i){
+            j+=i?",\n    ":"\n    ";
+            j+="{\"title\": \""+JsonEsc(g_theory[i].title)+"\", \"content\": \""+JsonEsc(g_theory[i].content)+"\", \"done\": "+((i<g_done.size()&&g_done[i])?"true":"false")+"}";
+        }
+        j+="\n  ]";
+    }
+    j+="\n}\n";
+    return j;
+}
+std::wstring Q(const std::wstring& s){ return L"\""+s+L"\""; }
+// minigame.py (load/finish) - запасная копия: если автор не положил его в папку игры, приложение кладёт сам
+const char* kMiniGamePy = R"PY("""Helper for mini-games: load() reads data.json, finish() writes result.json."""
+import argparse
+import json
+import sys
+
+_args = None
+
+
+def _parse():
+    global _args
+    if _args is None:
+        p = argparse.ArgumentParser()
+        p.add_argument("--data", default="data.json")
+        p.add_argument("--result", default="result.json")
+        _args, _ = p.parse_known_args()
+    return _args
+
+
+def load():
+    try:
+        with open(_parse().data, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def finish(score, max, completed=True):
+    with open(_parse().result, "w", encoding="utf-8") as f:
+        json.dump({"score": int(score), "max": int(max), "completed": bool(completed)}, f)
+    sys.exit(0)
+)PY";
+std::wstring g_runTail, g_runDir, g_runLog; bool g_triedPy=false;   // для повторного запуска через py -3
+bool Spawn(const std::wstring& cmd,const std::wstring& cwd,const std::wstring& log,HANDLE& out){
+    SECURITY_ATTRIBUTES sa{}; sa.nLength=sizeof sa; sa.bInheritHandle=TRUE;
+    HANDLE lf=CreateFileW(log.c_str(),GENERIC_WRITE,FILE_SHARE_READ,&sa,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    STARTUPINFOW si{}; si.cb=sizeof si;
+    if(lf!=INVALID_HANDLE_VALUE){ si.dwFlags=STARTF_USESTDHANDLES; si.hStdOutput=lf; si.hStdError=lf; si.hStdInput=nullptr; }
+    PROCESS_INFORMATION pi{};
+    std::wstring c=cmd;                                   // CreateProcessW может менять буфер
+    const BOOL ok=CreateProcessW(nullptr,c.data(),nullptr,nullptr,lf!=INVALID_HANDLE_VALUE,CREATE_NO_WINDOW,nullptr,cwd.c_str(),&si,&pi);
+    if(lf!=INVALID_HANDLE_VALUE) CloseHandle(lf);
+    if(!ok) return false;
+    CloseHandle(pi.hThread); out=pi.hProcess; return true;
+}
+// последняя непустая строка лога (обычно сама ошибка Python)
+std::string LastLogLine(const std::wstring& log){
+    std::string t=ReadAll(std::filesystem::path(log)); 
+    while(!t.empty()&&(t.back()=='\n'||t.back()=='\r'||t.back()==' ')) t.pop_back();
+    const size_t k=t.find_last_of('\n'); return k==std::string::npos?t:t.substr(k+1);
+}
+void LaunchGame(size_t i){
+    g_msgUntil=0;
+    if(g_proc||i>=g_games.size()||g_games[i].files.empty()) return;
+    namespace fs=std::filesystem;
+    const fs::path dir=fs::path(Utf8ToWide(g_games[i].files[0]));
+    const std::string entry=g_games[i].content.empty()?"main.py":g_games[i].content;
+    const fs::path dataP=dir/L"data.json", resP=dir/L"result.json";
+    std::error_code ec; fs::remove(resP,ec);
+    if(!fs::exists(dir/L"minigame.py",ec)){ std::ofstream mf(dir/L"minigame.py",std::ios::binary|std::ios::trunc); mf<<kMiniGamePy; }
+    if(!fs::exists(dir/fs::path(Utf8ToWide(entry)),ec)){ g_gameMsg=UiText("ENTRY FILE NOT FOUND","ФАЙЛ ЗАПУСКА ИГРЫ НЕ НАЙДЕН"); return; }
+    {   std::ofstream f(dataP,std::ios::binary|std::ios::trunc);
+        if(!f){ g_gameMsg=UiText("CANNOT WRITE GAME DATA","НЕ УДАЛОСЬ ЗАПИСАТЬ ДАННЫЕ ИГРЫ"); return; }
+        f<<BuildGameData(ReadAll(dir/L"manifest.json")); }
+    const std::wstring tail=L" "+Q(Utf8ToWide(entry))+L" --data "+Q(dataP.wstring())+L" --result "+Q(resP.wstring());
+    HANDLE h=nullptr;
+    g_runTail=tail; g_runDir=dir.wstring(); g_runLog=(dir/L"game.log").wstring(); g_triedPy=false;
+    if(!Spawn(L"python"+tail,g_runDir,g_runLog,h) && !(g_triedPy=true,Spawn(L"py -3"+tail,g_runDir,g_runLog,h))){
+        g_gameMsg=UiText("PYTHON NOT FOUND","PYTHON НЕ НАЙДЕН (УСТАНОВИТЕ ЕГО И ДОБАВЬТЕ В PATH)"); return;
+    }
+    g_proc=h; g_procGame=int(i); g_gameMsg=UiText("GAME IS RUNNING...","ИГРА ЗАПУЩЕНА..."); 
+}
+// каждый кадр: игра закрылась -> читаем result.json, сохраняем лучший результат и прогресс
+void PollGame(){
+    if(!g_proc) return;
+    if(WaitForSingleObject(g_proc,0)!=WAIT_OBJECT_0) return;
+    DWORD code=0; GetExitCodeProcess(g_proc,&code); CloseHandle(g_proc); g_proc=nullptr;
+    const int gi=g_procGame; g_procGame=-1;
+    if(gi<0||size_t(gi)>=g_games.size()||size_t(gi)>=g_gameRes.size()) return;
+    namespace fs=std::filesystem;
+    const std::string j=ReadAll(fs::path(Utf8ToWide(g_games[size_t(gi)].files[0]))/L"result.json");
+    int sc=0,mx=0; bool cp=false;
+    if(!JsonInt(j,"score",sc)||!JsonInt(j,"max",mx)||mx<=0){
+        if(code!=0&&!g_triedPy){                          // python не сработал (нет в PATH / заглушка Microsoft Store): пробуем py -3
+            g_triedPy=true; HANDLE h=nullptr;
+            if(Spawn(L"py -3"+g_runTail,g_runDir,g_runLog,h)){ g_proc=h; g_procGame=gi; g_gameMsg=UiText("GAME IS RUNNING...","ИГРА ЗАПУЩЕНА..."); return; }
+        }
+        std::string why=LastLogLine(g_runLog);
+        g_gameMsg=code!=0?(std::string(UiText("GAME FAILED, CODE ","ОШИБКА ИГРЫ, КОД "))+std::to_string(code)+(why.empty()?"":": "+why))
+                         :std::string(UiText("GAME CLOSED WITHOUT RESULT","ИГРА ЗАКРЫТА БЕЗ РЕЗУЛЬТАТА"));
+        return;
+    }
+    JsonBool(j,"completed",cp);
+    sc=std::clamp(sc,0,mx);
+    GameResult& r=g_gameRes[size_t(gi)];
+    // лучший результат по доле; при равной доле - завершённая попытка
+    const bool better=!r.played||sc*r.max>r.score*mx||(sc*r.max==r.score*mx&&cp&&!r.completed);
+    if(better) r={sc,mx,cp,true};
+    g_gameMsg=std::string(UiText("RESULT: ","РЕЗУЛЬТАТ: "))+std::to_string(sc)+"/"+std::to_string(mx);
+    Save();
+}
+// Доля выполнения репозитория - та же, что на шкале внизу экрана (конспекты + верные ответы + игры).
+// Репозиторий выполнен, когда шкала показывает 100%. Опыт mainXp зачисляется один раз на репозиторий.
+void TryAward(){
+  if(g_login.empty()||(g_mainXp<=0&&(g_subjectXp<=0||g_subjectTag.empty()))) return;
+  double done=0.0; int total=0;
+  for(size_t i=0;i<g_done.size();++i){ ++total; if(g_done[i])++done; }
+  for(size_t k=0;k<g_qCorrect.size()&&k<g_answers.size();++k){
+    if(NormAnswer(g_qCorrect[k]).empty()) continue;
+    ++total; if(AnswerState(g_answers[k],g_qCorrect[k])==1)++done;
+  }
+  for(size_t i=0;i<g_games.size();++i){
+    ++total; if(i<g_gameRes.size()&&g_gameRes[i].played&&g_gameRes[i].max>0) done+=double(g_gameRes[i].score)/double(g_gameRes[i].max);
+  }
+  if(total<=0||std::lround(100.0*done/double(total))<100) return;
+  std::string key=g_dir; while(!key.empty()&&(key.back()=='/'||key.back()=='\\')) key.pop_back();
+  const size_t cut=key.find_last_of("/\\"); if(cut!=std::string::npos) key=key.substr(cut+1);
+  const bool gotMain=Level_AwardRepo(g_login,key,g_mainXp);
+  const bool gotSubject=Level_AwardSubject(g_login,key,g_subjectTag,g_subjectXp);
+  if(gotMain||gotSubject){
+    g_gameMsg=std::string(UiText("REPOSITORY COMPLETE!","РЕПОЗИТОРИЙ ВЫПОЛНЕН!"));
+    if(gotMain) g_gameMsg+=" +"+std::to_string(g_mainXp)+" XP";
+    if(gotSubject) g_gameMsg+=" +"+std::to_string(g_subjectXp)+" "+g_subjectTag;
+    g_msgUntil=SDL_GetTicks()+5000;
+  }
+}
+}
+void Opened_Open(SDL_Window* window,const std::string& dir,const std::string& login){ g_dir=dir; g_login=login; g_mainXp=0; g_subjectXp=0; g_subjectTag.clear(); CreateData d; g_theory.clear();g_tests.clear(); g_games.clear(); g_gameMsg.clear(); g_gamesOpen=true; if(RepoStore_Load(dir,d)){g_mainXp=d.mainXp;g_subjectXp=d.subjectXp;g_subjectTag=d.subjectTag;g_theory=d.theory;g_tests=d.tests;g_games=d.games;} NormalizeTests(); g_noteOpen.assign(g_theory.size(),false);g_testOpen.assign(g_tests.size(),false);g_theoryOpen=true;g_testsOpen=true;g_answerFocus=false;g_answerIndex=-1;g_scroll=0;g_answerUndo.clear();g_dirty=false;Load(); TryAward(); SDL_StartTextInput(window); }
+void Opened_Close(SDL_Window* window){ if(g_proc){ TerminateProcess(g_proc,1); CloseHandle(g_proc); g_proc=nullptr; g_procGame=-1; } FreeView(); g_drag=false; if(g_dirty)Save(); SDL_StopTextInput(window);g_dir.clear();g_theory.clear();g_tests.clear();g_done.clear();g_answers.clear();g_qOff.clear();g_qOpen.clear();g_qCorrect.clear();g_qTotal=0;g_hits.clear();g_answerFocus=false;g_games.clear();g_gameRes.clear(); }
 void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
- g_viewW=float(w); g_back.label=UiText("BACK","НАЗАД"); g_save.label=UiText("SAVE","СОХР.");
+ PollGame(); if(g_msgUntil&&SDL_GetTicks()>g_msgUntil){ g_gameMsg.clear(); g_msgUntil=0; } g_viewW=float(w); g_back.label=UiText("BACK","НАЗАД"); g_save.label=UiText("SAVE","СОХР.");
  g_hits.clear(); Text(r,UiText("OPENED REPOSITORY","ОТКРЫТЫЙ РЕПОЗИТОРИЙ"),20,22,1); Text(r,g_dir.substr(g_dir.find_last_of("/\\")+1),20,48,1,180);
+ if(!g_gameMsg.empty()) Text(r,g_gameMsg,std::max(20.f,float(w)-20.f-16.f*float(Utf8Count(g_gameMsg))),48,1,200);
  g_back.x=20.0f;g_back.y=static_cast<float>(h-62);TextButton_Draw(r,g_back);nd[ndCount++]=TextButton_Rect(g_back);
  g_save.x=static_cast<float>(w-188);g_save.y=static_cast<float>(h-62);g_save.hovered=g_dirty;TextButton_Draw(r,g_save);nd[ndCount++]=TextButton_Rect(g_save);
+ // шкала выполнения между НАЗАД и СОХР.: (изученные конспекты + верные ответы) / (все конспекты + вопросы, у которых задан верный ответ)
+ {
+   double done=0.0; int total=0;
+   for(size_t i=0;i<g_done.size();++i){ ++total; if(g_done[i])++done; }
+   for(size_t k=0;k<g_qCorrect.size()&&k<g_answers.size();++k){
+     if(NormAnswer(g_qCorrect[k]).empty()) continue;                 // вопрос без верного ответа проверить нельзя
+     ++total; if(AnswerState(g_answers[k],g_qCorrect[k])==1)++done;
+   }
+   for(size_t i=0;i<g_games.size();++i){                              // игра = одна единица; засчитывается доля лучшего результата
+     ++total; if(i<g_gameRes.size()&&g_gameRes[i].played&&g_gameRes[i].max>0) done+=double(g_gameRes[i].score)/double(g_gameRes[i].max);
+   }
+   const float bx=150.f, textW=84.f, bw=float(w)-210.f-bx-textW;
+   if(bw>=60.f){
+     const int pct=total>0?int(std::lround(100.0*done/double(total))):0;
+     const SDL_FRect bar{bx,float(h)-52.f,bw,22.f}; Rect(r,bar);
+     if(pct>0){
+       const SDL_FRect fill{bar.x+3.f,bar.y+3.f,(bar.w-6.f)*float(pct)/100.f,bar.h-6.f};
+       SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
+       if(pct>=100) SDL_SetRenderDrawColor(r,90,230,120,210); else SDL_SetRenderDrawColor(r,R,G,B,210);
+       SDL_RenderFillRect(r,&fill);
+     }
+     Text(r,std::to_string(pct)+"%",bx+bw+12.f,float(h)-51.f);
+   }
+ }
 
  // Содержимое листается внутри области между заголовком и кнопками. Все строки переносятся по ширине окна,
  // а если всё не помещается по высоте, справа появляется ползунок.
@@ -314,14 +626,30 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
    // поле ответа: введённый текст переносится, поле растёт вниз
    auto answerRow=[&](size_t i){
      const bool empty=g_answers[i].empty();
-     const std::vector<std::string> lines=WrapText(empty?std::string(UiText("ENTER YOUR ANSWER...","ВВЕДИТЕ ОТВЕТ...")):g_answers[i],charsFor(x+38,rowRight-36));
+     const std::vector<std::string> lines=WrapText(empty?std::string(UiText("ENTER YOUR ANSWER...","ВВЕДИТЕ ОТВЕТ...")):g_answers[i],charsFor(x+38,rowRight-70));    // справа место под галочку
      const float H=std::max(38.f,float(lines.size())*18.f+20.f);
      if(draw&&vis(y,H)){
        SDL_FRect a{x+28,y,width-56,H}; Rect(r,a,g_answerIndex==int(i));
        for(size_t k=0;k<lines.size();++k) Text(r,lines[k],a.x+10,y+13.f+float(k)*18.f,1,empty?110:255);
+       const int verdict=(i<g_qCorrect.size())?AnswerState(g_answers[i],g_qCorrect[i]):-1;
+       if(verdict>=0) DrawVerdict(r,a.x+a.w-26.f,y+19.f,verdict==1);
        AddHit(a.x,a.y,a.w,a.h,6,int(i));
      }
      y+=H+8.f;
+   };
+
+   // вопрос теста: раскрываемая строка с номером и текстом; раскрытый вопрос показывает своё поле ответа
+   auto questionBlock=[&](size_t flat,size_t num,const std::string& text){
+     const bool op=g_qOpen[flat];
+     const std::vector<std::string> lines=WrapPrefixed(op?"v  ":">  ",std::to_string(num)+". "+text,charsFor(x+38,rowRight-36));
+     const float H=std::max(34.f,float(lines.size())*18.f+16.f);
+     if(draw&&vis(y,H)){
+       SDL_FRect q{x+20,y,width-40,H}; Rect(r,q,In(q,float(g_mx),float(g_my)));
+       for(size_t k=0;k<lines.size();++k) Text(r,lines[k],q.x+10,y+10.f+float(k)*18.f);
+       AddHit(q.x,q.y,q.w,q.h,9,int(flat));
+     }
+     y+=H+6.f;
+     if(op) answerRow(flat);
    };
 
    section(UiText("NOTES","КОНСПЕКТЫ"),g_theoryOpen,1);
@@ -332,7 +660,27 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
    y+=8.f; section(UiText("TESTS","ТЕСТЫ"),g_testsOpen,4);
    if(g_testsOpen) for(size_t i=0;i<g_tests.size();++i){
      titleRow(g_testOpen[i],g_tests[i].title,5,int(i));
-     if(g_testOpen[i]){ contentLines(g_tests[i].content); fileList(g_tests[i].files,8,int(i)); answerRow(i); }
+     if(g_testOpen[i]){
+       for(size_t q=0;q<g_tests[i].questions.size();++q) questionBlock(g_qOff[i]+q,q+1,g_tests[i].questions[q].text);
+       fileList(g_tests[i].files,8,int(i));
+     }
+   }
+   if(!g_games.empty()){
+     y+=8.f; section(UiText("GAMES","ИГРЫ"),g_gamesOpen,10);
+     if(g_gamesOpen) for(size_t i=0;i<g_games.size();++i){
+       std::string res=UiText("NOT PLAYED","НЕ ИГРАЛИ");
+       if(g_proc&&g_procGame==int(i)) res=UiText("RUNNING","ИДЁТ ИГРА");
+       else if(i<g_gameRes.size()&&g_gameRes[i].played) res=std::to_string(g_gameRes[i].score)+"/"+std::to_string(g_gameRes[i].max)+(g_gameRes[i].completed?"":" *");
+       const std::vector<std::string> lines=WrapPrefixed("> ",g_games[i].title,charsFor(x+18,rowRight-18-16.f*float(Utf8Count(res)+2)));
+       const float H=std::max(34.f,float(lines.size())*18.f+16.f);
+       if(draw&&vis(y,H)){
+         SDL_FRect q{x+8,y,width-16,H}; Rect(r,q,In(q,float(g_mx),float(g_my)));
+         for(size_t k=0;k<lines.size();++k) Text(r,lines[k],x+18,y+10.f+float(k)*18.f);
+         Text(r,res,q.x+q.w-10.f-16.f*float(Utf8Count(res)),y+10.f,1,170);
+         AddHit(q.x,q.y,q.w,q.h,11,int(i));
+       }
+       y+=H+6.f;
+     }
    }
  };
 
@@ -415,8 +763,8 @@ OpenedResult Opened_Handle(SDL_Window*window,const SDL_Event&e){
  if(e.type==SDL_EVENT_MOUSE_MOTION&&g_drag){ScrollFromMouse(e.motion.y);return OpenedResult::None;}
  if(e.type==SDL_EVENT_MOUSE_BUTTON_UP&&e.button.button==SDL_BUTTON_LEFT)g_drag=false;
  if(TextButton_Handle(g_back,e)){Opened_Close(window);return OpenedResult::Back;}
- if(TextButton_Handle(g_save,e)){Save();return OpenedResult::None;}
- if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN&&e.button.button==SDL_BUTTON_LEFT){for(const Hit&h:g_hits)if(In(h.rc,e.button.x,e.button.y)&&e.button.y>=g_viewTopY&&e.button.y<=g_viewBotY){switch(h.type){case 1:g_theoryOpen=!g_theoryOpen;break;case 2:g_noteOpen[size_t(h.index)]=!g_noteOpen[size_t(h.index)];break;case 3:g_done[size_t(h.index)]=!g_done[size_t(h.index)];g_dirty=true;break;case 4:g_testsOpen=!g_testsOpen;break;case 5:g_testOpen[size_t(h.index)]=!g_testOpen[size_t(h.index)];break;case 6:g_answerFocus=true;g_answerIndex=h.index;break;case 7:{g_answerFocus=false;const auto&fl=g_theory[size_t(h.index)].files;if(h.sub>=0&&size_t(h.sub)<fl.size())OpenAttachment(fl[size_t(h.sub)]);break;}case 8:{g_answerFocus=false;const auto&fl=g_tests[size_t(h.index)].files;if(h.sub>=0&&size_t(h.sub)<fl.size())OpenAttachment(fl[size_t(h.sub)]);break;}}return OpenedResult::None;}g_answerFocus=false;}
+ if(TextButton_Handle(g_save,e)){ g_gameMsg=Save()?UiText("SAVED","СОХРАНЕНО"):UiText("SAVE FAILED","ОШИБКА СОХРАНЕНИЯ"); g_msgUntil=SDL_GetTicks()+2500; return OpenedResult::None; }
+ if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN&&e.button.button==SDL_BUTTON_LEFT){for(const Hit&h:g_hits)if(In(h.rc,e.button.x,e.button.y)&&e.button.y>=g_viewTopY&&e.button.y<=g_viewBotY){switch(h.type){case 1:g_theoryOpen=!g_theoryOpen;break;case 2:g_noteOpen[size_t(h.index)]=!g_noteOpen[size_t(h.index)];break;case 3:g_done[size_t(h.index)]=!g_done[size_t(h.index)];g_dirty=true;break;case 4:g_testsOpen=!g_testsOpen;break;case 10:g_gamesOpen=!g_gamesOpen;break;case 11:g_answerFocus=false;LaunchGame(size_t(h.index));break;case 5:g_testOpen[size_t(h.index)]=!g_testOpen[size_t(h.index)];break;case 6:g_answerFocus=true;g_answerIndex=h.index;break;case 9:if(h.index>=0&&size_t(h.index)<g_qOpen.size()){g_qOpen[size_t(h.index)]=!g_qOpen[size_t(h.index)];if(g_answerIndex==h.index)g_answerFocus=false;}break;case 7:{g_answerFocus=false;const auto&fl=g_theory[size_t(h.index)].files;if(h.sub>=0&&size_t(h.sub)<fl.size())OpenAttachment(fl[size_t(h.sub)]);break;}case 8:{g_answerFocus=false;const auto&fl=g_tests[size_t(h.index)].files;if(h.sub>=0&&size_t(h.sub)<fl.size())OpenAttachment(fl[size_t(h.sub)]);break;}}return OpenedResult::None;}g_answerFocus=false;}
  if(e.type==SDL_EVENT_KEY_DOWN&&!e.key.repeat&&e.key.key==SDLK_ESCAPE){Opened_Close(window);return OpenedResult::Back;}
  return OpenedResult::None;
 }

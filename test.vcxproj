@@ -70,6 +70,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <TargetName>aquadeck</TargetName>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -135,14 +138,16 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>   C:\libs\SDL3-3.4.20\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
+      <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>   C:\libs\SDL3-3.4.20\lib\x64</AdditionalLibraryDirectories>
       <AdditionalDependencies>SDL3.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
@@ -155,15 +160,18 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Achievements.cpp" />
     <ClCompile Include="Avatar.cpp" />
     <ClCompile Include="Border.cpp" />
     <ClCompile Include="Button.cpp" />
     <ClCompile Include="ConfirmDialog.cpp" />
     <ClCompile Include="CreateScreen.cpp" />
+    <ClCompile Include="Level.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainScreen.cpp" />
     <ClCompile Include="OpenedScreen.cpp" />
     <ClCompile Include="ProfileScreen.cpp" />
+    <ClCompile Include="RanksScreen.cpp" />
     <ClCompile Include="RecoverDialog.cpp" />
     <ClCompile Include="RepoStore.cpp" />
     <ClCompile Include="SaveOverlay.cpp" />
@@ -178,15 +186,18 @@
     <ClCompile Include="WindowFrame.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Achievements.h" />
     <ClInclude Include="Avatar.h" />
     <ClInclude Include="Border.h" />
     <ClInclude Include="Button.h" />
     <ClInclude Include="ConfirmDialog.h" />
     <ClInclude Include="CreateScreen.h" />
+    <ClInclude Include="Level.h" />
     <ClInclude Include="MainScreen.h" />
     <ClInclude Include="Localization.h" />
     <ClInclude Include="OpenedScreen.h" />
     <ClInclude Include="ProfileScreen.h" />
+    <ClInclude Include="RanksScreen.h" />
     <ClInclude Include="RecoverDialog.h" />
     <ClInclude Include="RepoStore.h" />
     <ClInclude Include="SaveOverlay.h" />
@@ -205,6 +216,9 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="sprite.bmp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="aquadeck.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -13,6 +13,7 @@
 #include "RecoverDialog.h"
 #include "MainScreen.h"
 #include "ProfileScreen.h"
+#include "RanksScreen.h"
 #include "CreateScreen.h"
 #include "Avatar.h"
 #include "UserStore.h"
@@ -21,12 +22,17 @@
 #include "OpenedScreen.h"
 #include "TheoryDialog.h"
 #include "Localization.h"
+#include "Theme.h"
+#include "Logo.h"
+#include "Splash.h"
+#include "Tutorial.h"
+#include "CapriVisit.h"
 #include <algorithm>
 #include <string>
 #include <vector>
 #include <cmath>
 
-enum class Screen { Login, SignIn, SignUp, Main, Profile, Create, Opened };
+enum class Screen { Login, SignIn, SignUp, Main, Profile, Ranks, Create, Opened };
 static Screen g_screen = Screen::Login;
 static std::string g_user;   // логин вошедшего пользователя (как записан при регистрации)
 static std::string g_editDir;   // папка репозитория, который сейчас правят на экране CREATE ("" = создание нового)
@@ -39,7 +45,9 @@ static bool g_menuInterfacePage = false;
 static bool g_lngDropdownOpen = false;
 static TextButton g_menuPanel{ 0, 0, 360, 230, "" };
 static TextButton g_interfaceButton{ 0, 0, 280, 48, "INTERFACE" };
+static TextButton g_tutorialButton{ 0, 0, 280, 48, "TUTORIAL" };
 static TextButton g_interfaceBackButton{ 0, 0, 110, 38, "BACK" };
+static TextButton g_capriToggle{ 0, 0, 150, 42, "ON" };
 static TextButton g_lngButton{ 0, 0, 150, 42, "ENG  v" };
 static TextButton g_lngEngOption{ 0, 0, 150, 38, "ENG" };
 static TextButton g_lngRusOption{ 0, 0, 150, 38, "RUS" };
@@ -48,16 +56,23 @@ static SDL_Rect g_minimizeRect{ 0, 0, 28, 28 };
 static SDL_Rect g_closeRect{ 0, 0, 28, 28 };
 static bool g_minimizeHovered = false;
 static bool g_closeHovered = false;
-static const int kRadius = 12;
+static const int kRadius = 0;   // угловатое окно в стиле кибердека
+static SDL_Rect g_fullscreenRect{ 0, 0, 28, 28 };
+static bool g_fullscreenHovered = false;
+// Полноэкранный режим — дополнительная функция: приложение стартует в обычном окне,
+// переключение кнопкой в правом верхнем углу или клавишей F11.
+static bool g_fullscreen = false;
+static int CurRadius() { return g_fullscreen ? 0 : kRadius; }
+static int CurResizeBorder() { return g_fullscreen ? 0 : 10; }
 
 // Текстуры иконок управления окном используют ту же модель свечения,
 // что и MENU: мягкий ореол отдельной текстурой + яркое ядро.
 namespace {
     constexpr int kControlIconSize = 28;
     constexpr int kControlGlowPad = 10;
-    constexpr Uint8 kControlR = 90;
-    constexpr Uint8 kControlG = 200;
-    constexpr Uint8 kControlB = 255;
+    constexpr Uint8 kControlR = 96;
+    constexpr Uint8 kControlG = 228;
+    constexpr Uint8 kControlB = 232;
 
     struct ControlIconTextures {
         SDL_Texture* core = nullptr;
@@ -67,6 +82,7 @@ namespace {
 
     ControlIconTextures g_closeTextures;
     ControlIconTextures g_minimizeTextures;
+    ControlIconTextures g_fullscreenTextures;
 
     Uint32 PackControlPixel(Uint8 alpha) {
         return (Uint32(alpha) << 24) | (Uint32(kControlB) << 16) |
@@ -96,7 +112,7 @@ namespace {
         icon.owner = nullptr;
     }
 
-    void BuildControlIcon(SDL_Renderer* renderer, ControlIconTextures& icon, bool isClose) {
+    void BuildControlIcon(SDL_Renderer* renderer, ControlIconTextures& icon, int kind) {
         if (icon.owner == renderer && icon.core && icon.glow) return;
         DestroyControlIcon(icon);
 
@@ -110,7 +126,14 @@ namespace {
                 const float y = static_cast<float>(py - kControlGlowPad) + 0.5f;
                 float distance = 1000.0f;
 
-                if (isClose) {
+                if (kind == 2) {   // значок полного экрана: квадрат
+                    distance = std::min(std::min(
+                        DistanceToSegment(x, y, 8.0f, 8.0f, 20.0f, 8.0f),
+                        DistanceToSegment(x, y, 20.0f, 8.0f, 20.0f, 20.0f)),
+                        std::min(
+                        DistanceToSegment(x, y, 20.0f, 20.0f, 8.0f, 20.0f),
+                        DistanceToSegment(x, y, 8.0f, 20.0f, 8.0f, 8.0f)));
+                } else if (kind == 1) {
                     distance = std::min(
                         DistanceToSegment(x, y, 9.0f, 9.0f, 19.0f, 19.0f),
                         DistanceToSegment(x, y, 19.0f, 9.0f, 9.0f, 19.0f));
@@ -150,8 +173,8 @@ namespace {
     }
 
     void DrawControlIcon(SDL_Renderer* renderer, ControlIconTextures& icon,
-                         const SDL_Rect& rect, bool isClose, bool hovered) {
-        BuildControlIcon(renderer, icon, isClose);
+                         const SDL_Rect& rect, int kind, bool hovered) {
+        BuildControlIcon(renderer, icon, kind);
         if (!icon.core || !icon.glow) return;
 
         const int textureSize = kControlIconSize + kControlGlowPad * 2;
@@ -215,21 +238,68 @@ static void SetUiLanguage(bool russian) {
     SaveLanguagePreference(russian);
 }
 
-static const char* kVersion = "v0.1.1";
+// Флаг «обучение пройдено»: отдельный файл рядом с языком, чтобы не показывать обучение каждый запуск.
+static std::string TutorialPreferencePath() {
+    char* prefPath = SDL_GetPrefPath("myproject", "settings");
+    if (!prefPath) return {};
+    std::string path(prefPath);
+    SDL_free(prefPath);
+    if (path.empty()) return {};
+    return path + "tutorial.cfg";
+}
 
-// маленькая подпись по нижним углам: слева автор, справа версия
+static bool TutorialAlreadyDone() {
+    const std::string path = TutorialPreferencePath();
+    if (path.empty()) return true;   // некуда сохранить флаг: не надоедаем обучением на каждом запуске
+    std::ifstream input(path, std::ios::binary);
+    std::string v;
+    return input && std::getline(input, v) && v.rfind("DONE", 0) == 0;
+}
+
+static void SaveTutorialDone() {
+    const std::string path = TutorialPreferencePath();
+    if (path.empty()) return;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (output) output << "DONE";
+}
+
+// Настройка «Капри заглядывает раз в 30 минут» (ON / OFF) хранится рядом с языком.
+static std::string CapriPreferencePath() {
+    char* prefPath = SDL_GetPrefPath("myproject", "settings");
+    if (!prefPath) return {};
+    std::string path(prefPath);
+    SDL_free(prefPath);
+    if (path.empty()) return {};
+    return path + "capri.cfg";
+}
+
+static void LoadCapriPreference() {
+    const std::string path = CapriPreferencePath();
+    if (path.empty()) return;
+    std::ifstream input(path, std::ios::binary);
+    std::string v;
+    if (input && std::getline(input, v)) CapriVisit::g_enabled = (v.rfind("OFF", 0) != 0);
+}
+
+static void SetCapriVisits(bool on) {
+    CapriVisit::SetEnabled(on);
+    const std::string path = CapriPreferencePath();
+    if (path.empty()) return;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (output) output << (on ? "ON" : "OFF");
+}
+
+static const char* kVersion = "v1.0.0";
+
+// маленькая подпись внизу: справа версия (слева теперь логотип, он рисуется в Draw())
 static void DrawFooter(int w, int h) {
     constexpr int fontHeight = 8;
-    const float margin = 18.f;
     const float y = static_cast<float>(h) - 14.f - fontHeight;
-    const std::string author = "by Aquarius";
-
-    DrawUtf8Text(g_renderer, author, margin, y, fontHeight, 90, 200, 255, 150);
     // справа внизу стоит шестерня настроек: версия сдвинута левее неё
     const float versionRight = static_cast<float>(w) - 20.f - g_menu.size - 14.f;
     DrawUtf8Text(g_renderer, kVersion,
         versionRight - Utf8TextWidth(kVersion, fontHeight),
-        y, fontHeight, 90, 200, 255, 150);
+        y, fontHeight, 96, 228, 232, 150);
 }
 
 // Окно поверх экрана (FORGOT, новая теория / тест, IMPORT / CREATE, просмотр картинки): пока оно открыто,
@@ -240,17 +310,22 @@ static bool ModalOpen() {
     case Screen::Create: return Theory_IsOpen();
     case Screen::Main:   return Main_IsModalOpen();
     case Screen::Opened: return Opened_IsViewing();
+    case Screen::Ranks:  return Ranks_IsModalOpen();
     default:             return false;
     }
 }
 
-static void Draw() {
+// Рисует один кадр приложения в текущую цель рендера (без SDL_RenderPresent):
+// заставка Splash рисует его в текстуру и склеивает с собой глитчем.
+static void DrawScene() {
     SDL_Rect nd[kMaxNoDragRects];
-    SDL_SetRenderDrawColor(g_renderer, 30, 30, 30, 255);
-    SDL_RenderClear(g_renderer);
 
+    // смена экрана запускает анимацию перехода (экран меняется сразу, поверх открываются полосы)
+    static Screen s_prevScreen = g_screen;
+    if (s_prevScreen != g_screen) { Theme::TransitionStart(); s_prevScreen = g_screen; }
     int w = 0, h = 0;
     SDL_GetCurrentRenderOutputSize(g_renderer, &w, &h);
+    Theme::DrawBackground(g_renderer, w, h);
 
     // кнопка настроек (шестерня): правый нижний угол
     const float margin = 20.f;
@@ -259,7 +334,13 @@ static void Draw() {
 
     // подпись внизу на всех экранах, кроме главного (там "by Aquarius" уже вверху)
     // (и пока открыто окно теории на весь экран: оно упирается в подпись)
-    if (g_screen != Screen::Main && !(g_screen == Screen::Create && Theory_IsOpen())) DrawFooter(w, h);
+    // логотип в левом нижнем углу на месте бывшей подписи «by Aquarius» (на всех экранах)
+    if (!(g_screen == Screen::Create && Theory_IsOpen()) &&
+        !(g_screen == Screen::Ranks && Ranks_IsModalOpen()))
+        Logo::Draw(g_renderer, 26.f, float(h) - 26.f - 56.f, 56.f);   // чуть в стороне от угловых скобок рамки
+
+    if (g_screen != Screen::Main && !(g_screen == Screen::Create && Theory_IsOpen()) &&
+        !(g_screen == Screen::Ranks && Ranks_IsModalOpen())) DrawFooter(w, h);
 
     int ndCount = 0;
     nd[ndCount++] = { int(g_menu.x) - 6, int(g_menu.y) - 6,
@@ -270,8 +351,10 @@ static void Draw() {
     const int controlCenterX = static_cast<int>(std::lround(float(w) - margin - 9.f));
     const int controlY = 8;
     g_closeRect = { controlCenterX - 14, controlY, 28, 28 };
-    g_minimizeRect = { controlCenterX - 34 - 14, controlY, 28, 28 };
+    g_fullscreenRect = { controlCenterX - 34 - 14, controlY, 28, 28 };
+    g_minimizeRect = { controlCenterX - 68 - 14, controlY, 28, 28 };
     nd[ndCount++] = g_minimizeRect;
+    nd[ndCount++] = g_fullscreenRect;
     nd[ndCount++] = g_closeRect;
 
     // Шестерня рисуется до содержимого экрана: окна поверх экрана перекрывают её (и затемняют), а не наоборот.
@@ -306,6 +389,9 @@ static void Draw() {
         else if (g_screen == Screen::Profile) {
             Profile_Draw(g_renderer, w, h, nd, ndCount);
         }
+        else if (g_screen == Screen::Ranks) {
+            Ranks_Draw(g_renderer, w, h, nd, ndCount);
+        }
         else if (g_screen == Screen::Create) {
             Create_Draw(g_renderer, w, h, nd, ndCount);
         }
@@ -319,7 +405,7 @@ static void Draw() {
     else {
         // Компактное меню приложения и отдельная вкладка INTERFACE.
         const float panelW = 360.f;
-        const float panelH = g_menuInterfacePage ? 250.f : 190.f;
+        const float panelH = g_menuInterfacePage ? 250.f : 240.f;
         const float px = (w - panelW) * 0.5f;
         const float py = (h - panelH) * 0.5f;
         g_menuPanel.x = px + 12.f;
@@ -338,6 +424,13 @@ static void Draw() {
             g_interfaceButton.w = panelW - 80.f;
             TextButton_Draw(g_renderer, g_interfaceButton);
             nd[ndCount++] = TextButton_Rect(g_interfaceButton);
+
+            g_tutorialButton.label = UiText("TUTORIAL", "ОБУЧЕНИЕ");
+            g_tutorialButton.x = px + 40.f;
+            g_tutorialButton.y = py + 142.f;
+            g_tutorialButton.w = panelW - 80.f;
+            TextButton_Draw(g_renderer, g_tutorialButton);
+            nd[ndCount++] = TextButton_Rect(g_tutorialButton);
         }
         else {
             g_interfaceBackButton.label = UiText("BACK", "НАЗАД");
@@ -346,13 +439,23 @@ static void Draw() {
             TextButton_Draw(g_renderer, g_interfaceBackButton);
 
             // Подпись настройки языка и выпадающий список.
-            DrawUtf8Text(g_renderer, UiText("LNG", "ЯЗЫК"), px + 48.f, py + 91.f, 18, 90, 200, 255, 255);
+            DrawUtf8Text(g_renderer, UiText("LNG", "ЯЗЫК"), px + 48.f, py + 91.f, 18, 96, 228, 232, 255);
             g_lngButton.x = px + 160.f;
             g_lngButton.y = py + 78.f;
             g_lngButton.label = UiRussianFlag() ? "RUS  v" : "ENG  v";
             TextButton_Draw(g_renderer, g_lngButton);
             nd[ndCount++] = TextButton_Rect(g_lngButton);
             nd[ndCount++] = TextButton_Rect(g_interfaceBackButton);
+
+            // Капри: заглядывать раз в 30 минут или нет (при открытом списке языков строка скрыта под ним)
+            if (!g_lngDropdownOpen) {
+                DrawUtf8Text(g_renderer, UiText("CAPRI", "КАПРИ"), px + 48.f, py + 143.f, 18, 96, 228, 232, 255);
+                g_capriToggle.x = px + 160.f;
+                g_capriToggle.y = py + 130.f;
+                g_capriToggle.label = CapriVisit::g_enabled ? UiText("ON", "ВКЛ") : UiText("OFF", "ВЫКЛ");
+                TextButton_Draw(g_renderer, g_capriToggle);
+                nd[ndCount++] = TextButton_Rect(g_capriToggle);
+            }
 
             if (g_lngDropdownOpen) {
                 g_lngEngOption.x = g_lngButton.x;
@@ -375,14 +478,44 @@ static void Draw() {
         nd[ndCount++] = { 0, 0, 0, 0 };
     }
 
+    if (Tutorial::Active()) ndCount = Tutorial::AppendNoDrag(nd, ndCount, kMaxNoDragRects);
+    ndCount = CapriVisit::AppendNoDrag(nd, ndCount, kMaxNoDragRects);
     SetNoDragRects(nd, ndCount);
 
     // CLOSE и MINIMIZE получают то же текстурное неоновое свечение, что и MENU.
-    DrawControlIcon(g_renderer, g_minimizeTextures, g_minimizeRect, false, g_minimizeHovered);
-    DrawControlIcon(g_renderer, g_closeTextures, g_closeRect, true, g_closeHovered);
+    DrawControlIcon(g_renderer, g_minimizeTextures, g_minimizeRect, 0, g_minimizeHovered);
+    DrawControlIcon(g_renderer, g_fullscreenTextures, g_fullscreenRect, 2, g_fullscreenHovered);
+    DrawControlIcon(g_renderer, g_closeTextures, g_closeRect, 1, g_closeHovered);
 
-    DrawBorderGlow(g_renderer, w, h, kRadius, 1, 20, 120, 90.0f, 0.35f, 0.06f);
+    Theme::DrawTransition(g_renderer, w, h);
+    Theme::DrawHudFrame(g_renderer, w, h, g_fullscreen);
 
+    // обучение с Капри: поверх всего, с «прожектором» на нужном элементе
+    {
+        Tutorial::Targets tg;
+        tg.hasSign = (g_screen == Screen::Login) && !g_menu.open;
+        if (tg.hasSign) {
+            const SDL_Rect a = TextButton_Rect(g_signIn), b = TextButton_Rect(g_signUp);
+            const int x0 = std::min(a.x, b.x), y0 = std::min(a.y, b.y);
+            tg.sign = { x0, y0, std::max(a.x + a.w, b.x + b.w) - x0, std::max(a.y + a.h, b.y + b.h) - y0 };
+        }
+        tg.controls = { g_minimizeRect.x, g_minimizeRect.y, g_closeRect.x + g_closeRect.w - g_minimizeRect.x, g_closeRect.h };
+        tg.gear = { int(g_menu.x), int(g_menu.y), int(g_menu.size), int(MenuButtonHeight(g_menu.size)) };
+        Tutorial::SetTargets(tg);
+        Tutorial::Draw(g_renderer, w, h);
+
+        // раз в 30 минут Капри заглядывает с фразой ("как дела?", "сходи разомнись"...)
+        CapriVisit::Draw(g_renderer, w, h, Tutorial::Active() || g_menu.open || g_repoSaving || ModalOpen());
+    }
+}
+
+static void Draw() {
+    // при запуске: иконка из темноты -> "by Aqua femboy~" -> глитч Blackwall -> главное окно
+    if (Splash::Render(g_renderer, DrawScene)) {
+        SDL_RenderPresent(g_renderer);
+        return;
+    }
+    DrawScene();
     SDL_RenderPresent(g_renderer);
 }
 
@@ -395,10 +528,17 @@ static bool SDLCALL LiveResizeWatch(void* userdata, SDL_Event* e) {
 
         if (SDL_GetWindowFromID(e->window.windowID) != window) return true;
 
-        ApplyRoundRegion(window, kRadius);
+        ApplyRoundRegion(window, CurRadius());
         Draw();
     }
     return true;
+}
+
+static void ToggleFullscreen(SDL_Window* window) {
+    g_fullscreen = !g_fullscreen;
+    SDL_SetWindowFullscreen(window, g_fullscreen);
+    EnableWindowFrame(window, 0, CurResizeBorder());
+    ApplyRoundRegion(window, CurRadius());
 }
 
 int main(int argc, char* argv[]) {
@@ -409,8 +549,9 @@ int main(int argc, char* argv[]) {
 
     // Применяем сохранённый язык до первого кадра и открытия любого экрана.
     LoadLanguagePreference();
+    LoadCapriPreference();
 
-    SDL_Window* window = SDL_CreateWindow("myproject", 800, 600,
+    SDL_Window* window = SDL_CreateWindow("aquadeck", 800, 600,
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
     if (!window) {
         std::cerr << "SDL_CreateWindow error: " << SDL_GetError() << '\n';
@@ -426,9 +567,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    EnableWindowFrame(window, 0, 10);        // зоны кнопок выставляет Draw()
+    EnableWindowFrame(window, 0, CurResizeBorder());        // зоны кнопок выставляет Draw()
     SDL_SetWindowMinimumSize(window, 200, 150);
-    ApplyRoundRegion(window, kRadius);
+    ApplyRoundRegion(window, CurRadius());
+    // «загрузку» при запуске теперь показывает заставка Splash (глитч Blackwall)
 
     // запомненный вход: сразу открываем главный экран
     {
@@ -443,19 +585,41 @@ int main(int argc, char* argv[]) {
 
     SDL_AddEventWatch(LiveResizeWatch, window);
 
+    Tutorial::g_onFinish = SaveTutorialDone;
+    bool tutorialChecked = false;
+
     bool running = true;
     while (running) {
+        // первый запуск: как только заставка закончилась, Капри начинает обучение
+        if (!tutorialChecked && !Splash::Active()) {
+            tutorialChecked = true;
+            if (!TutorialAlreadyDone()) Tutorial::Start();
+        }
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running = false;
+
+            // F11: переключение полноэкранного режима
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F11 && !e.key.repeat) {
+                ToggleFullscreen(window);
+                continue;
+            }
+
+            // пока играет заставка, ввод не доходит до приложения; клик или клавиша ускоряют её (сразу глитч)
+            if (Splash::Active()) {
+                if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) Splash::Skip();
+                continue;
+            }
 
             if (e.type == SDL_EVENT_MOUSE_MOTION) {
                 const SDL_Point mousePoint{ static_cast<int>(e.motion.x), static_cast<int>(e.motion.y) };
                 g_closeHovered = SDL_PointInRect(&mousePoint, &g_closeRect);
                 g_minimizeHovered = SDL_PointInRect(&mousePoint, &g_minimizeRect);
+                g_fullscreenHovered = SDL_PointInRect(&mousePoint, &g_fullscreenRect);
             } else if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
                 g_closeHovered = false;
                 g_minimizeHovered = false;
+                g_fullscreenHovered = false;
             }
 
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
@@ -466,11 +630,19 @@ int main(int argc, char* argv[]) {
                     running = false;
                     continue;
                 }
+                if (SDL_PointInRect(&mousePoint, &g_fullscreenRect)) {
+                    ToggleFullscreen(window);
+                    continue;
+                }
                 if (SDL_PointInRect(&mousePoint, &g_minimizeRect)) {
                     SDL_MinimizeWindow(window);
                     continue;
                 }
             }
+
+            // пока идёт обучение, все события получает только оно (кнопки окна выше всё равно работают)
+            if (Tutorial::Active()) { Tutorial::Handle(e); continue; }
+            if (CapriVisit::Handle(e)) continue;   // клик по Капри закрывает её фразу
 
             if (g_repoSaving) continue;   // пока идёт сохранение, ввод игнорируется
 
@@ -494,11 +666,21 @@ int main(int argc, char* argv[]) {
                 if (!g_menuInterfacePage) {
                     if (TextButton_Handle(g_interfaceButton, e))
                         g_menuInterfacePage = true;
+                    if (TextButton_Handle(g_tutorialButton, e)) {
+                        g_menu.open = false;            // закрыть меню и запустить обучение заново
+                        auto tg = Tutorial::g_targets;  // кнопки входа видны, если сейчас экран входа (меню уже закрыто)
+                        tg.hasSign = (g_screen == Screen::Login);
+                        Tutorial::SetTargets(tg);
+                        Tutorial::Start();
+                    }
                 }
                 else {
                     if (TextButton_Handle(g_interfaceBackButton, e)) {
                         g_menuInterfacePage = false;
                         g_lngDropdownOpen = false;
+                    }
+                    else if (!g_lngDropdownOpen && TextButton_Handle(g_capriToggle, e)) {
+                        SetCapriVisits(!CapriVisit::g_enabled);
                     }
                     else if (TextButton_Handle(g_lngButton, e)) {
                         g_lngDropdownOpen = !g_lngDropdownOpen;
@@ -584,7 +766,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     else if (res == MainResult::Open) {
-                        Opened_Open(window, Main_RepoDir());
+                        Opened_Open(window, Main_RepoDir(), g_user);
                         g_screen = Screen::Opened;
                     }
                     else if (res == MainResult::Logout) {
@@ -596,9 +778,20 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 else if (g_screen == Screen::Profile) {
-                    if (Profile_Handle(e) == ProfileResult::Back) {
+                    const ProfileResult pr = Profile_Handle(e);
+                    if (pr == ProfileResult::Back) {
                         Profile_Close();
                         g_screen = Screen::Main;
+                    }
+                    else if (pr == ProfileResult::Ranks) {
+                        Ranks_Open(window, g_user);
+                        g_screen = Screen::Ranks;
+                    }
+                }
+                else if (g_screen == Screen::Ranks) {
+                    if (Ranks_Handle(e) == RanksResult::Back) {
+                        Profile_Open(window, g_user);      // вернулись в профиль: перечитать опыт и достижения
+                        g_screen = Screen::Profile;
                     }
                 }
                 else if (g_screen == Screen::Opened) {
@@ -655,6 +848,7 @@ int main(int argc, char* argv[]) {
                 g_screen = Screen::Create;
             }
         }
+        if (g_screen == Screen::Ranks) Ranks_Poll();       // вложения из окна теста
         if (g_screen == Screen::Profile) Profile_Poll();   // файл, выбранный в диалоге аватара
         if (g_screen == Screen::Create) Create_Poll();     // файл, выбранный в диалоге картинки
         Draw();
@@ -664,6 +858,7 @@ int main(int argc, char* argv[]) {
     SaveOverlay_Destroy();
     Recover_Destroy();
     Profile_Destroy();
+    Ranks_Destroy();
     Create_Destroy();
     Opened_Destroy();
     Main_Destroy();
@@ -674,13 +869,19 @@ int main(int argc, char* argv[]) {
     TextButton_Destroy(g_signUp);
     TextButton_Destroy(g_menuPanel);
     TextButton_Destroy(g_interfaceButton);
+    TextButton_Destroy(g_tutorialButton);
     TextButton_Destroy(g_interfaceBackButton);
     TextButton_Destroy(g_lngButton);
+    TextButton_Destroy(g_capriToggle);
     TextButton_Destroy(g_lngEngOption);
     TextButton_Destroy(g_lngRusOption);
     MenuButton_Destroy(g_menu);
     DestroyControlIcon(g_closeTextures);
     DestroyControlIcon(g_minimizeTextures);
+    DestroyControlIcon(g_fullscreenTextures);
+    Logo::Destroy();
+    Splash::Destroy();
+    Tutorial::Destroy();
     DestroyBorderCache();
     SDL_DestroyRenderer(g_renderer);
     SDL_DestroyWindow(window);

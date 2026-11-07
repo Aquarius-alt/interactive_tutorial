@@ -164,6 +164,14 @@ namespace {
             j += "  \"title\": " + Q(it.title) + ",\n";
             j += "  \"content\": " + Q(it.content) + ",\n";
             if (withAnswers) j += "  \"answers\": " + Q(it.answers) + ",\n";
+            if (withAnswers) j += "  \"subjectTags\": " + Q(it.subjectTags) + ",\n  \"rank\": " + Q(it.rank) + ",\n";
+            if (withAnswers) {                           // вопросы теста: два параллельных массива
+                j += "  \"questions\": [";
+                for (size_t k = 0; k < it.questions.size(); ++k) j += (k ? ", " : "") + Q(it.questions[k].text);
+                j += "],\n  \"questionAnswers\": [";
+                for (size_t k = 0; k < it.questions.size(); ++k) j += (k ? ", " : "") + Q(it.questions[k].answers);
+                j += "],\n";
+            }
             j += std::string("  \"madeWithAI\": ") + (it.madeWithAI ? "true" : "false") + ",\n";
             j += "  \"files\": [";
             for (size_t k = 0; k < names.size(); ++k) j += (k ? ", " : "") + Q(names[k]);
@@ -214,6 +222,15 @@ namespace {
         return ReadQuoted(j, p);
     }
 
+    // целое поле "key": 123 (нет поля или не число -> 0)
+    int JsonInt(const std::string& j, const std::string& key) {
+        const size_t p = JsonValuePos(j, key);
+        if (p == std::string::npos) return 0;
+        long long v = 0;
+        for (size_t i = p; i < j.size() && j[i] >= '0' && j[i] <= '9'; ++i) v = std::min<long long>(1000000000LL, v * 10 + (j[i] - '0'));
+        return int(v);
+    }
+
     bool JsonBool(const std::string& j, const std::string& key) {
         const size_t p = JsonValuePos(j, key);
         return p != std::string::npos && j.compare(p, 4, "true") == 0;
@@ -257,6 +274,14 @@ namespace {
             it.title = JsonString(j, "title");
             it.content = JsonString(j, "content");
             if (withAnswers) it.answers = JsonString(j, "answers");
+            if (withAnswers) {
+                it.subjectTags = JsonString(j, "subjectTags");
+                it.rank = JsonString(j, "rank");
+                const std::vector<std::string> qt = JsonStringArray(j, "questions");
+                const std::vector<std::string> qa = JsonStringArray(j, "questionAnswers");
+                for (size_t k = 0; k < qt.size(); ++k)
+                    it.questions.push_back({ qt[k], k < qa.size() ? qa[k] : std::string() });
+            }
             it.madeWithAI = JsonBool(j, "madeWithAI");
             for (const std::string& name : JsonStringArray(j, "files")) {
                 const fs::path fp = d / L"files" / P(name);
@@ -265,6 +290,53 @@ namespace {
             items.push_back(std::move(it));
         }
         return items;
+    }
+
+    // мини-игры: папка каждой игры копируется целиком в games\001_<имя>\, рядом пишется _repo_game.json
+    // (title - название, entry - файл запуска). item.files[0] = папка игры.
+    bool WriteGames(const fs::path& dir, const std::vector<TheoryItem>& games) {
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        if (ec) return false;
+
+        for (size_t i = 0; i < games.size(); ++i) {
+            const TheoryItem& g = games[i];
+            if (g.files.empty()) continue;
+            const fs::path d = dir / P(Num(int(i) + 1) + "_" + SafeName(g.title, "game"));
+            fs::create_directories(d, ec);
+            if (ec) return false;
+            fs::copy(P(g.files[0]), d, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+            if (ec) return false;
+
+            std::string j = "{\n";
+            j += "  \"title\": " + Q(g.title) + ",\n";
+            j += "  \"entry\": " + Q(g.content) + "\n}\n";
+            if (!WriteText(d / L"_repo_game.json", j)) return false;
+        }
+        return true;
+    }
+
+    std::vector<TheoryItem> ReadGames(const fs::path& dir) {
+        std::vector<TheoryItem> games;
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec)) return games;
+
+        std::vector<fs::path> dirs;
+        for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_directory(ec)) dirs.push_back(it->path());
+        std::sort(dirs.begin(), dirs.end());
+
+        for (const fs::path& d : dirs) {
+            const std::string j = ReadFile(d / L"_repo_game.json");
+            TheoryItem it;
+            it.title = JsonString(j, "title");
+            it.content = JsonString(j, "entry");
+            if (it.title.empty()) it.title = Narrow(d.filename().wstring());
+            if (it.content.empty()) it.content = "main.py";
+            it.files.push_back(Narrow(d.wstring()));
+            games.push_back(std::move(it));
+        }
+        return games;
     }
 }
 
@@ -279,6 +351,89 @@ std::string RepoStore_Root() {
 }
 
 // Открывает в Проводнике папку текущего пользователя с сохранёнными репозиториями.
+// Папка заданий на ранг лежит внутри папки пользователя, но без repo.json, поэтому
+// RepoStore_List её репозиторием не считает.
+bool RepoStore_OpenRanksFolder(const std::string& user) {
+    try {
+        const std::string rootStr = RepoStore_Root();
+        if (rootStr.empty() || user.empty()) return false;
+
+        const fs::path dir = P(rootStr) / P(SafeName(user, "user")) / L"_ranks";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        if (ec) return false;
+
+        const auto result = reinterpret_cast<INT_PTR>(
+            ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+        return result > 32;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
+// Задание на ранг = тест (title, вопросы, теги предмета, звание, вложения), сохранённый одной папкой
+// <Documents>\myproject\<логин>\_ranks\<название>\ (item.json, content.txt, files\).
+// Запись идёт во временную папку и переименовывается только при успехе. Если задание с таким
+// названием уже есть, добавляется " (2)", " (3)" и т.д.
+bool RepoStore_SaveRankTask(const std::string& user, const TheoryItem& task) {
+    try {
+        const std::string rootStr = RepoStore_Root();
+        if (rootStr.empty() || user.empty()) return false;
+
+        std::error_code ec;
+        const fs::path ranksDir = P(rootStr) / P(SafeName(user, "user")) / L"_ranks";
+        fs::create_directories(ranksDir, ec);
+        if (ec) return false;
+
+        const std::string base = SafeName(task.title, "task");
+        fs::path finalDir = ranksDir / P(base);
+        for (int n = 2; fs::exists(finalDir, ec) && n < 1000; ++n)
+            finalDir = ranksDir / P(base + " (" + std::to_string(n) + ")");
+        if (fs::exists(finalDir, ec)) return false;
+
+        fs::path tmp = finalDir;
+        tmp += L".tmp";
+        fs::remove_all(tmp, ec);
+
+        // WriteItems кладёт задание в <tmp>\001_<имя>\; затем эту папку переносим на место итоговой
+        if (!WriteItems(tmp, std::vector<TheoryItem>{ task }, true)) {
+            fs::remove_all(tmp, ec);
+            return false;
+        }
+        const fs::path inner = tmp / P(Num(1) + "_" + SafeName(task.title, "untitled"));
+        fs::rename(inner, finalDir, ec);
+        std::error_code e2;
+        fs::remove_all(tmp, e2);
+        return !ec;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
+std::vector<RankTask> RepoStore_ListRankTasks(const std::string& user) {
+    std::vector<RankTask> out;
+    try {
+        const std::string rootStr = RepoStore_Root();
+        if (rootStr.empty() || user.empty()) return out;
+        const fs::path dir = P(rootStr) / P(SafeName(user, "user")) / L"_ranks";
+
+        // те же папки, в том же порядке, что пропускает ReadItems (только с item.json): берём из них ключи
+        std::error_code ec;
+        std::vector<fs::path> dirs;
+        for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_directory(ec) && fs::exists(it->path() / L"item.json", ec)) dirs.push_back(it->path());
+        std::sort(dirs.begin(), dirs.end());
+
+        std::vector<TheoryItem> items = ReadItems(dir, true);
+        for (size_t i = 0; i < items.size() && i < dirs.size(); ++i)
+            out.push_back({ std::move(items[i]), Narrow(dirs[i].filename().wstring()) });
+    }
+    catch (...) {}
+    return out;
+}
+
 bool RepoStore_OpenUserFolder(const std::string& user) {
     try {
         const std::string rootStr = RepoStore_Root();
@@ -348,8 +503,7 @@ bool RepoStore_Save(const std::string& user, const CreateData& d, std::string* s
 
         if (!WriteItems(tmp / L"theory", d.theory, false)) return fail();
         if (!WriteItems(tmp / L"tests", d.tests, true)) return fail();
-        fs::create_directories(tmp / L"games", ec);          // игр пока нет
-        if (ec) return fail();
+        if (!WriteGames(tmp / L"games", d.games)) return fail();
 
         // при правке сохраняем исходную дату создания и время repo.json (по нему сортируется список,
         // поэтому отредактированный репозиторий остаётся на своём месте, а не уезжает в конец)
@@ -369,9 +523,12 @@ bool RepoStore_Save(const std::string& user, const CreateData& d, std::string* s
         j += "  \"author\": " + Q(user) + ",\n";
         j += "  \"created\": " + Q(created) + ",\n";
         j += "  \"cover\": " + Q(coverName) + ",\n";
+        j += "  \"mainXp\": " + std::to_string(std::max(0, d.mainXp)) + ",\n";
+        j += "  \"subjectXp\": " + std::to_string(std::max(0, d.subjectXp)) + ",\n";
+        j += "  \"subjectTag\": " + Q(d.subjectTag) + ",\n";
         j += "  \"theoryCount\": " + std::to_string(d.theory.size()) + ",\n";
         j += "  \"testsCount\": " + std::to_string(d.tests.size()) + ",\n";
-        j += "  \"gamesCount\": 0\n}\n";
+        j += "  \"gamesCount\": " + std::to_string(d.games.size()) + "\n}\n";
         if (!WriteText(tmp / L"repo.json", j)) return fail();
         if (haveStamp) fs::last_write_time(tmp / L"repo.json", oldStamp, ec);
 
@@ -467,14 +624,65 @@ bool RepoStore_Load(const std::string& dir, CreateData& out) {
         d.name = JsonString(j, "name");
         if (d.name.empty()) d.name = Narrow(p.filename().wstring());
         d.description = JsonString(j, "description");
+        d.mainXp = JsonInt(j, "mainXp");
+        d.subjectXp = JsonInt(j, "subjectXp");
+        d.subjectTag = JsonString(j, "subjectTag");
         const std::string cover = JsonString(j, "cover");
         if (!cover.empty() && fs::exists(p / P(cover), ec)) d.imagePath = Narrow((p / P(cover)).wstring());
         d.theory = ReadItems(p / L"theory", false);
         d.tests = ReadItems(p / L"tests", true);
+        d.games = ReadGames(p / L"games");
         out = std::move(d);
         return true;
     }
     catch (...) {
         return false;
+    }
+}
+
+bool RepoStore_InspectGame(const std::string& folder, std::string* name, std::string* entry, std::string* error) {
+    auto fail = [&](const char* msg) { if (error) *error = msg; return false; };
+    try {
+        fs::path dir = P(folder);
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec)) return fail("GAME FOLDER NOT FOUND");
+
+        std::string ent = "main.py", nm;
+        if (fs::is_regular_file(dir / L"manifest.json", ec)) {
+            const std::string j = ReadFile(dir / L"manifest.json");
+            nm = JsonString(j, "name");
+            const std::string e2 = JsonString(j, "entry");
+            if (!e2.empty()) ent = e2;
+        }
+        // файл запуска - путь внутри папки игры: без "..", без диска и без начального слэша
+        if (ent.find("..") != std::string::npos || ent.find(':') != std::string::npos ||
+            ent[0] == '/' || ent[0] == '\\')
+            return fail("BAD ENTRY FILE");
+        if (!fs::is_regular_file(dir / P(ent), ec))
+            return fail(ent == "main.py" ? "MAIN.PY NOT FOUND" : "ENTRY FILE NOT FOUND");
+
+        // защита от случайно выбранной огромной папки (рабочий стол, диск): копируем игры целиком
+        const unsigned long long kMaxBytes = 50ull * 1024 * 1024;
+        const size_t kMaxFiles = 500;
+        unsigned long long total = 0;
+        size_t count = 0;
+        for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
+             !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            total += it->file_size(ec);
+            if (++count > kMaxFiles || total > kMaxBytes) return fail("GAME FOLDER TOO LARGE");
+        }
+
+        if (nm.empty()) {
+            if (!dir.has_filename()) dir = dir.parent_path();      // путь мог кончаться на слэш
+            nm = Narrow(dir.filename().wstring());
+        }
+        if (nm.empty()) nm = "game";
+        if (name) *name = nm;
+        if (entry) *entry = ent;
+        return true;
+    }
+    catch (...) {
+        return fail("GAME FOLDER NOT FOUND");
     }
 }

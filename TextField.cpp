@@ -25,12 +25,12 @@ void TextField_Draw(SDL_Renderer* r, TextField& f) {
     const float tx = f.x + padX;
     const float ty = f.y + (f.h - fontHeight) * 0.5f;
     if (f.text.empty()) DrawUtf8TextFit(r, f.placeholder, tx, f.y + f.h * 0.5f, f.w - padX * 2.f,
-        fontHeight, false, 90, 200, 255, 90);          // подсказка не вылезает за рамку при любом языке
-    else DrawUtf8Text(r, shown, tx, ty, fontHeight, 200, 240, 255, 255);
+        fontHeight, false, 96, 228, 232, 90);          // подсказка не вылезает за рамку при любом языке
+    else DrawUtf8Text(r, shown, tx, ty, fontHeight, 205, 255, 255, 255);
 
     if (f.focused && (SDL_GetTicks() / 500) % 2 == 0) {
         const float cursorX = tx + Utf8TextWidth(shown, fontHeight);
-        DrawUtf8Text(r, "_", cursorX, ty, fontHeight, 90, 200, 255, 255);
+        DrawUtf8Text(r, "_", cursorX, ty, fontHeight, 96, 228, 232, 255);
     }
 }
 

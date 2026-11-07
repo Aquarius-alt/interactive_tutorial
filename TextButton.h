@@ -11,6 +11,13 @@ struct TextButton {
     SDL_Texture* glow = nullptr;
     SDL_Renderer* owner = nullptr;
     float         bw = 0, bh = 0;
+
+    // анимация (внутреннее): плавное наведение, глитч при наведении, вспышка при клике
+    float  hoverT = 0;          // 0..1, заполнение кораллом слева направо
+    bool   wasHovered = false;
+    Uint64 hoverStart = 0;      // момент начала наведения (глитч и «расшифровка» подписи)
+    Uint64 lastTick = 0;
+    Uint64 clickTick = 0;       // момент клика (вспышка)
 };
 
 void TextButton_Draw(SDL_Renderer* r, TextButton& b);

@@ -5,7 +5,7 @@
 
 namespace {
     const int   kPad = 10;                    // запас под свечение
-    const Uint8 kR = 90, kG = 200, kB = 255;  // голубой
+    const Uint8 kR = 96, kG = 228, kB = 232;  // голубой
     const float kGlowStrength = 0.30f;        // яркость свечения (0..1)
     const float kGlowFalloff = 2.6f;         // ширина свечения
     const float kAnimTime = 0.25f;        // длительность поворота, сек

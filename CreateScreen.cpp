@@ -3,6 +3,7 @@
 #include "TextButton.h"
 #include "TextArea.h"
 #include "TheoryDialog.h"
+#include "RepoStore.h"
 #include "Text.h"
 #include "Localization.h"
 #include <algorithm>
@@ -13,13 +14,16 @@
 #include <vector>
 
 namespace {
-    const Uint8 kR = 90, kG = 200, kB = 255;      // цвет неона, как у кнопок
+    const Uint8 kR = 96, kG = 228, kB = 232;      // цвет неона, как у кнопок
     const size_t kNameMax = 40;
     const size_t kDescMax = 500;
+    const size_t kTagMax = 24;
+    const size_t kXpDigits = 9;                   // опыт: только цифры, до 9 знаков
 
     SDL_Window* g_window = nullptr;
     TextField   g_name;
     TextArea    g_desc;
+    TextField   g_mainXp, g_subXp, g_tag;         // основной опыт, опыт предмета, тег предмета
     TextButton  g_pick{ 0, 0, 120, 120, "" };     // квадрат (1): картинка
     TextButton  g_back{ 0, 0, 110, 40, "BACK" };
     TextButton  g_ok{ 0, 0, 150, 40, "CREATE" };  // кнопка CREATE внизу справа
@@ -38,10 +42,12 @@ namespace {
     bool        g_editMode = false;                       // экран открыт для правки готового репозитория
     std::vector<TheoryItem> g_theory;                     // добавленные теории (кнопка "+" на вкладке THEORY)
     std::vector<TheoryItem> g_tests;                      // добавленные тесты (кнопка "+" на вкладке TESTS)
+    std::vector<TheoryItem> g_games;                      // добавленные игры (кнопка "+" на вкладке GAMES): title, content = файл запуска, files[0] = папка
+    int         g_gameEditIdx = -1;                       // какую игру заменяем (-1 = новая)
     int         g_scrollByTab[4] = { 0, 0, 0, 0 };        // положение ползунка у каждой вкладки (пока ушли на другую)
 
-    bool IsGridTab() { return g_tab == 1 || g_tab == 2; }                       // THEORY и TESTS: сетка карточек
-    std::vector<TheoryItem>& Items() { return g_tab == 2 ? g_tests : g_theory; }   // список текущей вкладки
+    bool IsGridTab() { return g_tab >= 1 && g_tab <= 3; }                       // THEORY, TESTS и GAMES: сетка карточек
+    std::vector<TheoryItem>& Items() { return g_tab == 3 ? g_games : (g_tab == 2 ? g_tests : g_theory); }   // список текущей вкладки
 
     // ---------- сетка конспектов на вкладке THEORY ----------
     // 3 колонки x 2 видимых ряда = 6 мест. Конспекты идут по порядку, "+" всегда стоит сразу после последнего.
@@ -142,11 +148,16 @@ namespace {
 
         for (size_t i = 0; i < lines.size(); ++i)
             DrawUtf8Text(r, lines[i], b.x + pad, b.y + pad + float(i) * (cs + 4.f),
-                std::max(10, static_cast<int>(8.f * scale)), 200, 240, 255, 255);
+                std::max(10, static_cast<int>(8.f * scale)), 205, 255, 255, 255);
 
         std::string foot;
-        if (it.madeWithAI) foot += UiText("AI ", "ИИ ");
-        if (!it.files.empty()) foot += std::string(UiText("FILES:", "ФАЙЛЫ:")) + std::to_string(it.files.size());
+        if (g_tab == 3) {
+            foot = it.content;                                 // у игры внизу карточки файл запуска (main.py)
+        }
+        else {
+            if (it.madeWithAI) foot += UiText("AI ", "ИИ ");
+            if (!it.files.empty()) foot += std::string(UiText("FILES:", "ФАЙЛЫ:")) + std::to_string(it.files.size());
+        }
         if (!foot.empty()) {
             DrawUtf8Text(r, foot, b.x + pad, b.y + b.h - pad - 8.f, 8, kR, kG, kB, 160);
         }
@@ -159,7 +170,7 @@ namespace {
                 SDL_SetRenderDrawColor(r, kR, kG, kB, 45);
                 SDL_RenderFillRect(r, &d);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 240 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
             const float dot = 4.f, gap = 4.f;
             const float x0 = std::floor(d.x + (d.w - (3.f * dot + 2.f * gap)) * 0.5f);
             const float y0 = std::floor(d.y + (d.h - dot) * 0.5f);
@@ -199,6 +210,26 @@ namespace {
         SDL_ShowOpenFileDialog(OnFileChosen, nullptr, g_window, filters, 1, nullptr, false);
     }
 
+    // папка игры выбирается в системном диалоге; как и с картинкой, путь приходит из другого потока
+    std::mutex        g_gameMutex;
+    std::string       g_gamePending;
+    std::atomic<bool> g_hasGame{ false };
+    std::atomic<bool> g_gameDialogOpen{ false };
+
+    void SDLCALL OnFolderChosen(void*, const char* const* list, int) {
+        if (list && list[0]) {                  // NULL = ошибка, пустой список = отмена
+            std::lock_guard<std::mutex> lock(g_gameMutex);
+            g_gamePending = list[0];
+            g_hasGame = true;
+        }
+        g_gameDialogOpen = false;
+    }
+
+    void ChooseGameFolder() {
+        if (g_gameDialogOpen.exchange(true)) return;   // диалог уже открыт
+        SDL_ShowOpenFolderDialog(OnFolderChosen, nullptr, g_window, nullptr, false);
+    }
+
     void EnsureInit() {
         if (g_init) return;
         g_init = true;
@@ -206,11 +237,38 @@ namespace {
         g_name.maxLen = kNameMax;
         g_desc.placeholder = "DESCRIPTION";
         g_desc.maxLen = kDescMax;
+        g_mainXp.maxLen = g_subXp.maxLen = kXpDigits;
+        g_tag.maxLen = kTagMax;
     }
 
+    // поля вкладки INFO по порядку: 0 название, 1 основной опыт, 2 опыт предмета, 3 тег предмета, 4 описание
+    const int kFields = 5;
     void Focus(int i) {
         g_name.focused = (i == 0);
-        g_desc.focused = (i == 1);
+        g_mainXp.focused = (i == 1);
+        g_subXp.focused = (i == 2);
+        g_tag.focused = (i == 3);
+        g_desc.focused = (i == 4);
+    }
+    int FocusedField() {
+        if (g_name.focused) return 0;
+        if (g_mainXp.focused) return 1;
+        if (g_subXp.focused) return 2;
+        if (g_tag.focused) return 3;
+        if (g_desc.focused) return 4;
+        return 0;
+    }
+    // в полях опыта оставляем только цифры (вставка из буфера тоже)
+    void KeepDigits(TextField& f) {
+        std::string o;
+        for (char ch : f.text) if (ch >= '0' && ch <= '9') o.push_back(ch);
+        if (o.size() > kXpDigits) o.resize(kXpDigits);
+        f.text = o;
+    }
+    int ParseXp(const std::string& t) {
+        long long v = 0;
+        for (char ch : t) if (ch >= '0' && ch <= '9') v = std::min<long long>(1000000000LL, v * 10 + (ch - '0'));
+        return int(v);
     }
 
     // ---------- картинка ----------
@@ -279,7 +337,7 @@ namespace {
     void DrawPlusIcon(SDL_Renderer* r, const TextButton& b) {
         const float cx = std::floor(b.x + b.w * 0.5f), cy = std::floor(b.y + b.h * 0.5f);
         const float len = 34.f, th = 4.f;
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 240 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         for (int i = 5; i >= 1; --i) {
@@ -300,7 +358,7 @@ namespace {
     void DrawPlaceholder(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.46f;
         const float len = S * 0.30f, th = std::max(3.f, S * 0.035f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 240 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
@@ -331,6 +389,7 @@ void Create_Open(SDL_Window* window) {
     g_window = window;
     g_name.text.clear();
     g_desc.text.clear();
+    g_mainXp.text.clear(); g_subXp.text.clear(); g_tag.text.clear();
     g_err.clear();
     FreeImage();
     g_hasPending = false;
@@ -338,14 +397,21 @@ void Create_Open(SDL_Window* window) {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_pending.clear();
     }
+    g_hasGame = false;
+    {
+        std::lock_guard<std::mutex> lock(g_gameMutex);
+        g_gamePending.clear();
+    }
     g_pick.hovered = g_back.hovered = g_ok.hovered = false;
-    g_name.hovered = g_desc.hovered = false;
+    g_name.hovered = g_desc.hovered = g_mainXp.hovered = g_subXp.hovered = g_tag.hovered = false;
     g_tab = 0;
     g_plusBtn.hovered = false;
     for (TextButton& t : g_tabBtn) t.hovered = false;
     g_mx = g_my = -1.f;
     g_theory.clear();
     g_tests.clear();
+    g_games.clear();
+    g_gameEditIdx = -1;
     for (int& sr : g_scrollByTab) sr = 0;
     g_scrollRow = 0;
     g_drag = false;
@@ -365,8 +431,12 @@ void Create_OpenEdit(SDL_Window* window, const CreateData& d) {
     g_ok.label = "SAVE";
     g_name.text = d.name;
     g_desc.text = d.description;
+    if (d.mainXp > 0) g_mainXp.text = std::to_string(d.mainXp);
+    if (d.subjectXp > 0) g_subXp.text = std::to_string(d.subjectXp);
+    g_tag.text = d.subjectTag;
     g_theory = d.theory;
     g_tests = d.tests;
+    g_games = d.games;
     if (!d.imagePath.empty() && !SetImage(d.imagePath)) g_err = "CANNOT LOAD IMAGE";
 }
 
@@ -374,9 +444,12 @@ void Create_Close(SDL_Window* window) {
     SDL_StopTextInput(window);
     g_name.text.clear();
     g_desc.text.clear();
+    g_mainXp.text.clear(); g_subXp.text.clear(); g_tag.text.clear();
     g_err.clear();
     g_theory.clear();
     g_tests.clear();
+    g_games.clear();
+    g_gameEditIdx = -1;
     for (int& sr : g_scrollByTab) sr = 0;
     g_scrollRow = 0;
     g_drag = false;
@@ -391,6 +464,35 @@ void Create_Close(SDL_Window* window) {
 
 void Create_Poll() {
     Theory_Poll();                                  // вложения, выбранные в окне теории
+
+    if (g_hasGame.exchange(false)) {                // папка игры из системного диалога
+        std::string folder;
+        {
+            std::lock_guard<std::mutex> lock(g_gameMutex);
+            folder = std::move(g_gamePending);
+            g_gamePending.clear();
+        }
+        std::string name, entry, error;
+        if (!RepoStore_InspectGame(folder, &name, &entry, &error)) {
+            g_err = error;                          // нет main.py, папка слишком большая и т. д.
+        }
+        else {
+            TheoryItem it;
+            it.title = name;
+            it.content = entry;
+            it.files.push_back(folder);
+            if (g_gameEditIdx >= 0 && g_gameEditIdx < int(g_games.size())) {
+                g_games[size_t(g_gameEditIdx)] = it;          // замена папки у существующей игры
+            }
+            else {
+                g_games.push_back(it);
+                if (g_tab == 3) ScrollToPlus();               // "+" уезжает на следующее место
+            }
+            g_err.clear();
+        }
+        g_gameEditIdx = -1;
+    }
+
     if (!g_hasPending.exchange(false)) return;
 
     std::string path;
@@ -411,6 +513,9 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     g_ok.w = std::max(150.f, Utf8TextWidth(g_ok.label, 16) + 32.f);          // «СОХРАНИТЬ» не влезает в 150 px
     g_name.placeholder = UiText("NAME", "НАЗВАНИЕ");
     g_desc.placeholder = UiText("DESCRIPTION", "ОПИСАНИЕ");
+    g_mainXp.placeholder = UiText("MAIN XP FOR COMPLETION", "ОСНОВНОЙ ОПЫТ ЗА ВЫПОЛНЕНИЕ");
+    g_subXp.placeholder = UiText("SUBJECT XP", "ОПЫТ ПРЕДМЕТА");
+    g_tag.placeholder = UiText("SUBJECT TAG", "ТЕГ ПРЕДМЕТА");
     g_menuEdit.label = UiText("EDIT", "ПРАВИТЬ");
     g_menuDel.label = UiText("DELETE", "УДАЛИТЬ");
 
@@ -470,8 +575,18 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         TextField_Draw(r, g_name);
         nd[ndCount++] = TextField_Rect(g_name);
 
+        // основной опыт, опыт предмета и тег предмета: три строки под названием
+        TextField* extra[3] = { &g_mainXp, &g_subXp, &g_tag };
+        float ey = top + fieldH + 14.f;
+        for (TextField* f : extra) {
+            f->x = x0; f->y = ey; f->w = rw; f->h = fieldH;
+            TextField_Draw(r, *f);
+            nd[ndCount++] = TextField_Rect(*f);
+            ey += fieldH + 14.f;
+        }
+
         // (1) описание: до нижнего ряда кнопок (с запасом под счётчик символов)
-        const float dy = top + fieldH + 14.f;
+        const float dy = ey;
         g_desc.x = x0; g_desc.y = dy; g_desc.w = rw;
         g_desc.h = std::max(60.f, bottomY - 22.f - dy);
         TextArea_Draw(r, g_desc);
@@ -532,7 +647,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             g_menuRect = { mx, my, mw, mh };
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(r, 22, 24, 30, 255);                  // фон, чтобы текст карточек не просвечивал
+            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);                  // фон, чтобы текст карточек не просвечивал
             SDL_RenderFillRect(r, &g_menuRect);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
             SDL_RenderRect(r, &g_menuRect);
@@ -566,7 +681,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
                 SDL_RenderFillRect(r, &gl);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 240 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
             SDL_RenderFillRect(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }
@@ -637,8 +752,14 @@ CreateResult Create_Handle(const SDL_Event& e) {
                 const int idx = g_menuIdx;
                 CloseMenu();
                 if (idx >= 0 && idx < int(Items().size())) {
-                    g_editIdx = idx;
-                    Theory_Edit(g_window, Items()[size_t(idx)], g_tab == 2);
+                    if (g_tab == 3) {                              // игра: выбрать другую папку вместо этой
+                        g_gameEditIdx = idx;
+                        ChooseGameFolder();
+                    }
+                    else {
+                        g_editIdx = idx;
+                        Theory_Edit(g_window, Items()[size_t(idx)], g_tab == 2);
+                    }
                 }
                 return CreateResult::None;
             }
@@ -684,22 +805,28 @@ CreateResult Create_Handle(const SDL_Event& e) {
     for (int i = 0; i < kTabs; ++i) {
         if (TextButton_Handle(g_tabBtn[i], e) && g_tab != i) {
             SwitchTab(i);
-            g_name.hovered = g_desc.hovered = g_plusBtn.hovered = false;
+            g_name.hovered = g_desc.hovered = g_plusBtn.hovered = g_mainXp.hovered = g_subXp.hovered = g_tag.hovered = false;
         }
     }
 
     // содержимое вкладки (положение чужих элементов устарело, поэтому их события не смотрим)
     if (g_tab == 0) {
         if (TextField_Handle(g_name, e)) Focus(0);
-        if (TextArea_Handle(g_desc, e)) Focus(1);
+        if (TextField_Handle(g_mainXp, e)) Focus(1);
+        if (TextField_Handle(g_subXp, e)) Focus(2);
+        if (TextField_Handle(g_tag, e)) Focus(3);
+        if (TextArea_Handle(g_desc, e)) Focus(4);
     }
     else {
         if (TextButton_Handle(g_plusBtn, e)) {
-            if (IsGridTab()) {                         // THEORY / TESTS: плавающее окно (у теста есть строка верных ответов)
+            if (g_tab == 3) {                          // GAMES: выбрать папку с игрой (main.py внутри)
+                g_gameEditIdx = -1;
+                ChooseGameFolder();
+            }
+            else if (IsGridTab()) {                    // THEORY / TESTS: плавающее окно (у теста есть строка верных ответов)
                 g_editIdx = -1;
                 Theory_Open(g_window, g_tab == 2);
             }
-            // сюда: добавить игру (g_tab = 3)
         }
         if (IsGridTab()) {
             for (int i = 0; i < g_visCards; ++i) {
@@ -742,6 +869,11 @@ CreateResult Create_Handle(const SDL_Event& e) {
     const bool backspace = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE;
     if (g_tab == 0 && (e.type == SDL_EVENT_TEXT_INPUT || backspace || IsEditShortcut(e))) {
         TextField_Input(g_name, e);
+        TextField_Input(g_mainXp, e);
+        TextField_Input(g_subXp, e);
+        TextField_Input(g_tag, e);
+        KeepDigits(g_mainXp);
+        KeepDigits(g_subXp);
         TextArea_Input(g_desc, e);
         g_err.clear();
     }
@@ -752,7 +884,7 @@ CreateResult Create_Handle(const SDL_Event& e) {
         if (g_tab == 0) {
             switch (e.key.key) {
             case SDLK_TAB:
-                Focus(g_name.focused ? 1 : 0);
+                Focus((FocusedField() + 1) % kFields);
                 break;
             case SDLK_RETURN:
             case SDLK_KP_ENTER:
@@ -760,7 +892,7 @@ CreateResult Create_Handle(const SDL_Event& e) {
                     if (g_desc.text.size() < kDescMax) g_desc.text.push_back('\n');   // новая строка
                 }
                 else {
-                    Focus(1);                                                         // из названия в описание
+                    Focus(FocusedField() + 1);                                        // к следующему полю, из тега в описание
                 }
                 break;
             }
@@ -780,13 +912,20 @@ void Create_Resume(SDL_Window* window, const char* error) {
 }
 
 CreateData Create_Data() {
-    return { g_name.text, g_desc.text, g_imgPath, g_theory, g_tests };
+    CreateData d{ g_name.text, g_desc.text, g_imgPath, g_theory, g_tests, g_games };
+    d.mainXp = ParseXp(g_mainXp.text);
+    d.subjectXp = ParseXp(g_subXp.text);
+    d.subjectTag = g_tag.text;
+    return d;
 }
 
 void Create_Destroy() {
     FreeImage();
     TextField_Destroy(g_name);
     TextArea_Destroy(g_desc);
+    TextField_Destroy(g_mainXp);
+    TextField_Destroy(g_subXp);
+    TextField_Destroy(g_tag);
     Theory_Destroy();
     TextButton_Destroy(g_pick);
     for (TextButton& t : g_tabBtn) TextButton_Destroy(t);

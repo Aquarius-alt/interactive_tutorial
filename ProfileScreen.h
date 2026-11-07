@@ -2,9 +2,9 @@
 #include <SDL3/SDL.h>
 #include <string>
 
-// Экран профиля: крупный аватар, логин, кнопка добавления/смены аватара и BACK.
+// Экран профиля: аватар и логин слева сверху, под ними кнопка "редактировать профиль", кнопка "получить ранг" и список рангов (заготовка), BACK.
 
-enum class ProfileResult { None, Back };
+enum class ProfileResult { None, Back, Ranks };   // Ranks = нажата кнопка "получить ранг"
 
 void          Profile_Open(SDL_Window* window, const std::string& login);
 void          Profile_Close();

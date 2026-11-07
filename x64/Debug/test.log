@@ -1,18 +1,3 @@
-﻿  ConfirmDialog.cpp
-  CreateScreen.cpp
-  MainScreen.cpp
-  OpenedScreen.cpp
-  ProfileScreen.cpp
-  RecoverDialog.cpp
-  SaveOverlay.cpp
-  SignInScreen.cpp
-  SignUpScreen.cpp
-  Text.cpp
-  TextArea.cpp
-  TextButton.cpp
-  TextField.cpp
-  TheoryDialog.cpp
-  main.cpp
-  Создание кода...
-  test.vcxproj -> C:\Users\aghan1m666\source\repos\test\x64\Debug\test.exe
+﻿  main.cpp
+  test.vcxproj -> C:\Users\aghan1m666\source\repos\test\x64\Debug\aquadeck.exe
   Скопировано файлов:         1.

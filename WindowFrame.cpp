@@ -60,6 +60,7 @@ namespace {
 void ApplyRoundRegion(SDL_Window* window, int radius) {
     HWND hwnd = GetHwnd(window);
     if (!hwnd) return;
+    if (radius <= 0) { SetWindowRgn(hwnd, nullptr, TRUE); return; }   // без скругления (полный экран)
     RECT r;
     GetClientRect(hwnd, &r);
     HRGN rgn = CreateRoundRectRgn(0, 0, r.right + 1, r.bottom + 1, radius * 2, radius * 2);

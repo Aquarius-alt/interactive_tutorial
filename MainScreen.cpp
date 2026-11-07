@@ -5,12 +5,14 @@
 #include "Text.h"
 #include "RepoStore.h"
 #include "Localization.h"
+#include "Level.h"
+#include "Theme.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
 
 namespace {
-    const Uint8 kR = 90, kG = 200, kB = 255;   // цвет неона, как у кнопок
+    const Uint8 kR = 96, kG = 228, kB = 232;   // цвет неона, как у кнопок
 
     // аватар: круг в левом верхнем углу
     const float kAvX = 20.f, kAvY = 16.f, kAvD = 40.f;
@@ -21,6 +23,8 @@ namespace {
     const float kMenuH = kMenuPad * 2 + kItemH * 2 + kItemGap;
 
     std::string g_login;
+    LevelInfo   g_level;                        // основной уровень для шапки; перечитывается раз в секунду,
+    Uint64      g_levelRead = 0;                // потому что опыт начисляется на других экранах
     bool        g_open = false;                 // список открыт
     bool        g_avHover = false;
 
@@ -35,6 +39,108 @@ namespace {
     const float kCardW = 150.f, kCardH = 176.f, kGap = 16.f;
     const float kGridX = 20.f, kGridY = 84.f, kBarGutter = 32.f;   // справа оставлен запас: внизу стоит шестерня настроек
     const float kCardPad = 16.f;
+
+    // ---------- случайная фраза сверху (на месте бывшей подписи «by Aquarius») ----------
+    // Печатается по буквам как в терминале, в конце мигает курсор, иногда глитчит.
+    // Новая фраза: при входе на экран, по клику на неё и раз в 30 секунд.
+    const char* const kPhrases[] = {
+        "приветик :3",
+        "hi ^^",
+        "голда",
+        "коч коч",
+        "фембои сила",
+        "я люблю фембоев",
+        "ПМИ умрут",
+        "снова?",
+        // в стиле программы
+        "доступ открыт",
+        "система онлайн",
+        "взлом завершен :3",
+        "root@aqua:~# мяу",
+        "sudo люблю тебя",
+        "ошибка 404: сон не найден",
+        "перезагрузка настроения...",
+        "загрузка милоты 100%",
+        "nya~ соединение установлено",
+        "ctrl+z не поможет",
+        "бип буп",
+        "кофе.exe не найден",
+        "hello world ^^",
+        "режим кибердека: вкл",
+        "uwu.exe запущен",
+        "сканирование... вайб найден",
+        "тесты сами себя не решат",
+        "еще один заход?",
+        "firewall пропустил котика",
+        "багов не обнаружено (наверное)",
+    };
+    const int kPhraseCount = int(sizeof(kPhrases) / sizeof(kPhrases[0]));
+    const Uint64 kPhraseLifeMs = 30000;
+    int    g_phrase = -1;
+    Uint64 g_phraseStart = 0;
+    SDL_FRect g_phraseRect{ 0, 0, 0, 0 };
+
+    void NextPhrase() {
+        static bool seeded = false;
+        if (!seeded) { SDL_srand(0); seeded = true; }
+        int n = g_phrase;
+        for (int tries = 0; tries < 8 && n == g_phrase; ++tries) n = int(SDL_rand(kPhraseCount));
+        g_phrase = n;
+        g_phraseStart = SDL_GetTicks();
+        g_phraseRect = { 0, 0, 0, 0 };
+    }
+
+    std::string Utf8Prefix(const std::string& s, size_t n) {
+        size_t i = 0;
+        while (i < s.size() && n > 0) {
+            const unsigned char c = static_cast<unsigned char>(s[i]);
+            i += c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4));
+            --n;
+        }
+        return s.substr(0, std::min(i, s.size()));
+    }
+
+    bool InPhrase(float mx, float my) {
+        return g_phraseRect.w > 0.f && mx >= g_phraseRect.x && mx <= g_phraseRect.x + g_phraseRect.w &&
+            my >= g_phraseRect.y && my <= g_phraseRect.y + g_phraseRect.h;
+    }
+
+    void DrawPhrase(SDL_Renderer* r, int w, float mx, float my, SDL_Rect* nd, int& ndCount) {
+        using namespace Theme;
+        if (g_phrase < 0 || SDL_GetTicks() - g_phraseStart > kPhraseLifeMs) NextPhrase();
+        const Uint64 now = SDL_GetTicks();
+        const std::string pre = "> ";
+        const std::string phrase = kPhrases[g_phrase];
+        const std::string full = pre + phrase + "_";
+
+        const float maxW = std::max(120.f, float(w) * 0.5f);
+        const int font = FitFontHeight(full, maxW, (w >= 520) ? 16 : 8);
+        const float fullW = Utf8TextWidth(full, font);
+        const float x0 = std::floor((float(w) - fullW) * 0.5f);
+        const float y = 12.f;
+        g_phraseRect = { x0 - 8.f, y - 4.f, fullW + 16.f, float(font) + 8.f };
+        nd[ndCount++] = { int(g_phraseRect.x), int(g_phraseRect.y), int(g_phraseRect.w), int(g_phraseRect.h) };
+
+        const bool hot = InPhrase(mx, my);
+        const size_t total = Utf8Count(pre + phrase);
+        const size_t typed = size_t(std::max<int>(0, int(now - g_phraseStart) - 200) / 40);   // 40 мс на букву
+        const bool done = typed >= total;
+        const std::string shown = Utf8Prefix(phrase, typed > 2 ? typed - 2 : 0);
+        const float preW = Utf8TextWidth(pre, font);
+        const Rgb tc = hot ? CyanHot : Cyan;
+
+        // редкий глитч: раз в ~7 секунд на 140 мс текст «расслаивается»
+        if (done && (now % 7000) < 140) {
+            const Uint32 fr = Uint32(now / 35);
+            const float off = 2.f + 2.f * Hash01(fr);
+            DrawUtf8Text(r, shown, x0 + preW - off, y, font, Coral.r, Coral.g, Coral.b, 170);
+            DrawUtf8Text(r, shown, x0 + preW + off, y + ((fr & 1u) ? 1.f : -1.f), font, tc.r, tc.g, tc.b, 150);
+        }
+        DrawUtf8Text(r, pre, x0, y, font, Coral.r, Coral.g, Coral.b, 255);
+        DrawUtf8Text(r, shown, x0 + preW, y, font, tc.r, tc.g, tc.b, 255);
+        if (!done || (now / 500) % 2 == 0)
+            DrawUtf8Text(r, "_", x0 + preW + Utf8TextWidth(shown, font), y, font, CyanHot.r, CyanHot.g, CyanHot.b, 255);
+    }
 
     struct RepoCard {
         std::string  name;
@@ -203,19 +309,19 @@ namespace {
         const int font = std::max(10, static_cast<int>(8.f * scale));
         if (maxW > 0.f) {
             DrawUtf8TextFit(r, s, cx - maxW * 0.5f, cy, maxW, font, true,
-                hovered ? 200 : kR, hovered ? 240 : kG, 255, 255);
+                hovered ? 200 : kR, hovered ? 255 : kG, 255, 255);
             return;
         }
         const float width = Utf8TextWidth(s, font);
         DrawUtf8Text(r, s, cx - width * 0.5f, cy - font * 0.5f, font,
-            hovered ? 200 : kR, hovered ? 240 : kG, 255, 255);
+            hovered ? 200 : kR, hovered ? 255 : kG, 255, 255);
     }
 
     // плюс из двух полос с мягким свечением; при наведении светлее
     void DrawPlus(SDL_Renderer* r, const TextButton& b) {
         const float cx = std::floor(b.x + b.w * 0.5f), cy = std::floor(b.y + b.h * 0.5f);
         const float len = 34.f, th = 4.f;
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 240 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         for (int i = 5; i >= 1; --i) {
@@ -296,7 +402,7 @@ namespace {
     void DrawImportIcon(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.5f;
         const float th = std::max(3.f, S * 0.045f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 240 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
 
@@ -316,7 +422,7 @@ namespace {
     void DrawCreateIcon(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.5f;
         const float th = std::max(3.f, S * 0.045f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 240 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
 
@@ -334,6 +440,7 @@ namespace {
 
 void Main_Open(const std::string& login) {
     g_login = login;
+    g_levelRead = 0;                            // уровень перечитается в первом кадре
     g_open = false;
     g_add = false;
     g_delDir.clear();
@@ -343,6 +450,7 @@ void Main_Open(const std::string& login) {
     g_import.hovered = g_create.hovered = false;
     g_mx = g_my = -1.f;
     g_chosenDir.clear();
+    NextPhrase();
     LoadRepos();
 }
 
@@ -372,11 +480,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     g_cmEdit.label = UiText("EDIT", "ПРАВИТЬ");
     g_cmOpen.label = UiText("OPEN", "ОТКРЫТЬ");
 
-    // надпись как можно выше, у самой рамки окна (центр строки = 5 + половина высоты букв)
-    const float titleScale = (w >= 520) ? 3.0f : 2.0f;
-    const float titleTop = 5.f;
-    const float titleCy = titleTop + float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) * titleScale * 0.5f;
-    DrawCenteredText(r, "by Aquarius", w, h, titleScale, titleCy - h * 0.5f);
+    DrawPhrase(r, w, g_mx, g_my, nd, ndCount);
 
     // сюда: содержимое главного экрана
 
@@ -386,7 +490,51 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
     // логин справа от аватара; справа оставляем место под кнопку меню
     const float textX = kAvX + kAvD + 14.f;
-    DrawLeftText(r, g_login, textX, kAvY + kAvD * 0.5f, float(w) - textX - 70.f);
+    const float loginW = std::min(180.f, Utf8TextWidth(g_login, 16));
+    DrawLeftText(r, g_login, textX, kAvY + kAvD * 0.5f, std::min(180.f, float(w) - textX - 70.f));
+
+    // основной уровень рядом с логином: квадратик с номером и шкала опыта (без названия группы)
+    {
+        const Uint64 now = SDL_GetTicks();
+        if (g_levelRead == 0 || now - g_levelRead > 1000) {
+            g_level = Level_FromXp(Level_GetXp(g_login));
+            g_levelRead = now ? now : 1;
+        }
+
+        const float cy = kAvY + kAvD * 0.5f, sq = 32.f;
+        const float lx = textX + loginW + 24.f;
+        // номер уровня: самый крупный шрифт, при котором цифры влезают в квадратик; если не влезают
+        // даже мелким (4+ цифры), квадратик растёт вширь, а не обрезает число ".."
+        const std::string lvl = std::to_string(g_level.level);
+        int lvlFont = 16;
+        while (lvlFont > 8 && Utf8TextWidth(lvl, lvlFont) + 8.f > sq) lvlFont -= 8;
+        const float boxW = std::max(sq, Utf8TextWidth(lvl, lvlFont) + 10.f);
+        const float bx = lx + boxW + 10.f, bw = std::min(240.f, float(w) - bx - 120.f);
+        if (bw >= 60.f) {
+            Uint8 tr, tg, tb;
+            Level_TierColor(g_level.tier, tr, tg, tb);
+
+            const SDL_FRect box{ lx, cy - sq * 0.5f, boxW, sq };
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+            SDL_RenderFillRect(r, &box);
+            SDL_SetRenderDrawColor(r, tr, tg, tb, 255);
+            SDL_RenderRect(r, &box);
+            DrawUtf8TextFit(r, lvl, lx + 2.f, cy, boxW - 4.f, lvlFont, true, tr, tg, tb, 255);
+
+            const SDL_FRect bar{ bx, cy - 8.f, bw, 16.f };
+            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+            SDL_RenderFillRect(r, &bar);
+            SDL_SetRenderDrawColor(r, tr, tg, tb, 110);
+            SDL_RenderRect(r, &bar);
+            const float frac = g_level.xpNeed > 0 ? float(double(g_level.xpInto) / double(g_level.xpNeed)) : 0.f;
+            if (frac > 0.f) {
+                const SDL_FRect fill{ bar.x + 3.f, bar.y + 3.f, (bar.w - 6.f) * std::min(frac, 1.f), bar.h - 6.f };
+                SDL_SetRenderDrawColor(r, tr, tg, tb, 210);      // шкала цвета группы уровня
+                SDL_RenderFillRect(r, &fill);
+            }
+        }
+    }
 
     // сетка репозиториев; "+" стоит сразу после последней карточки (список аватара рисуется поверх)
     {
@@ -446,7 +594,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
                 SDL_RenderFillRect(r, &gl);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 240 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
             SDL_RenderFillRect(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }
@@ -465,7 +613,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         g_cmRect = { mx, my, mw, mh };
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, 22, 24, 30, 255);                      // фон, чтобы карточки не просвечивали
+        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);                      // фон, чтобы карточки не просвечивали
         SDL_RenderFillRect(r, &g_cmRect);
         SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
         SDL_RenderRect(r, &g_cmRect);
@@ -492,7 +640,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         // фон списка: по форме скруглённой рамки до самого края (раньше отступ в 4 px пропускал угол карточки под списком)
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, 22, 24, 30, 255);
+        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
         FillRounded(r, { g_panel.x + 1.f, g_panel.y + 1.f, g_panel.w - 2.f, g_panel.h - 2.f }, 9.f);
         TextButton_Draw(r, g_panel);
 
@@ -524,7 +672,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         SDL_RenderFillRect(r, nullptr);
 
         // фон окна (с отступом, чтобы не торчал за скруглёнными углами рамки)
-        SDL_SetRenderDrawColor(r, 22, 24, 30, 255);
+        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
         const SDL_FRect bg = { px + 4, py + 4, pw - 8, ph - 8 };
         SDL_RenderFillRect(r, &bg);
 
@@ -578,6 +726,13 @@ MainResult Main_Handle(const SDL_Event& e) {
     }
 
     if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) { g_mx = g_my = -1.f; }
+
+    // клик по фразе сверху: следующая фраза
+    if (!Confirm_IsOpen() && e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT &&
+        InPhrase(e.button.x, e.button.y)) {
+        NextPhrase();
+        return MainResult::None;
+    }
 
     // окно подтверждения удаления: пока открыто, все события идут только ему
     if (Confirm_IsOpen()) {

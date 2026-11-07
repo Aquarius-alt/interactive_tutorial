@@ -6,7 +6,7 @@
 
 void DrawCenteredText(SDL_Renderer* r, const char* text, int w, int h,
     float scale = 3.0f, float yOffset = 0.0f,
-    Uint8 red = 90, Uint8 green = 200, Uint8 blue = 255);
+    Uint8 red = 96, Uint8 green = 228, Uint8 blue = 232);
 
 // UTF-8 helpers shared by all editable text controls.
 void DrawUtf8Text(SDL_Renderer* renderer, const std::string& text,

@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace {
-    const Uint8 kR = 90, kG = 200, kB = 255;   // цвет неона, как у кнопок
+    const Uint8 kR = 96, kG = 228, kB = 232;   // цвет неона, как у кнопок
     const int   kPad = 12;                      // запас вокруг круга под свечение
     const int   kBig = 256;                     // размер сохранённого квадрата
     const int   kSmall = 80;                    // версия для маленького аватара (чтобы не мылилось)

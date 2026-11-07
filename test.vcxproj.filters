@@ -21,6 +21,12 @@
     <ClCompile Include="WindowFrame.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="Level.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="Achievements.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
     <ClCompile Include="Avatar.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
@@ -60,6 +66,9 @@
     <ClCompile Include="CreateScreen.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="RanksScreen.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
     <ClCompile Include="RecoverDialog.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
@@ -81,6 +90,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="WindowFrame.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="Level.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="Achievements.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="Avatar.h">
@@ -129,6 +144,9 @@
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="CreateScreen.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="RanksScreen.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="RecoverDialog.h">
