@@ -1,20 +1,21 @@
-﻿  Achievements.cpp
+﻿  Avatar.cpp
+  Button.cpp
   ConfirmDialog.cpp
   CreateScreen.cpp
-  Level.cpp
+  main.cpp
   MainScreen.cpp
   OpenedScreen.cpp
   ProfileScreen.cpp
   RanksScreen.cpp
   RecoverDialog.cpp
-  SignInScreen.cpp
+  SaveOverlay.cpp
   SignUpScreen.cpp
   Text.cpp
   TextArea.cpp
   TextButton.cpp
   TextField.cpp
   TheoryDialog.cpp
-  main.cpp
+  Wallpapers.cpp
   Создание кода...
   test.vcxproj -> C:\Users\aghan1m666\source\repos\test\x64\Debug\aquadeck.exe
   Скопировано файлов:         1.

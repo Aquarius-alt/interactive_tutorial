@@ -152,14 +152,14 @@ namespace {
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(34.f * (1.f - i / 4.f)));
             const SDL_FRect hor = { cx - len / 2 - i, cy - th / 2 - i, len + 2.f * i, th + 2.f * i };
             const SDL_FRect ver = { cx - th / 2 - i, cy - len / 2 - i, th + 2.f * i, len + 2.f * i };
-            SDL_RenderFillRect(r, &hor);
-            SDL_RenderFillRect(r, &ver);
+            Theme::StyledFill(r, &hor);
+            Theme::StyledFill(r, &ver);
         }
         SDL_SetRenderDrawColor(r, R, G, B, 255);
         const SDL_FRect hor = { cx - len / 2, cy - th / 2, len, th };
         const SDL_FRect ver = { cx - th / 2, cy - len / 2, th, len };
-        SDL_RenderFillRect(r, &hor);
-        SDL_RenderFillRect(r, &ver);
+        Theme::StyledFill(r, &hor);
+        Theme::StyledFill(r, &ver);
     }
 
     // список вопросов между заголовком и нижним рядом кнопок: строки + в конце "+"; колесо мыши листает
@@ -499,7 +499,7 @@ void Theory_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     // фон окна (с отступом, чтобы не торчал за скруглёнными углами рамки)
     SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
     const SDL_FRect bg = { px + 4, py + 4, pw - 8, ph - 8 };
-    SDL_RenderFillRect(r, &bg);
+    Theme::StyledFill(r, &bg);
 
     g_panel.x = px; g_panel.y = py; g_panel.w = pw; g_panel.h = ph;
     g_panel.hovered = false;
@@ -599,7 +599,7 @@ void Theory_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, kR, kG, kB, 40);
         const SDL_FRect fill = { g_ai.x + 4.f, g_ai.y + 4.f, g_ai.w - 8.f, g_ai.h - 8.f };
-        SDL_RenderFillRect(r, &fill);
+        Theme::StyledFill(r, &fill);
     }
     g_ai.hovered = g_aiOn || Inside(g_ai, g_mx, g_my);
     TextButton_Draw(r, g_ai);

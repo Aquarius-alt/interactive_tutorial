@@ -412,7 +412,7 @@ inline void Draw(SDL_Renderer* r, int w, int h) {
         ly += lineH;
     }
     if (!g_typingDone && (int(t * 8.f) % 2 == 0)) {   // курсор, пока печатается
-        Theme::Rect(r, b.x + b.w - padIn - 8.f, b.y + b.h - padIn - btnH - 14.f, 8.f, 8.f, Theme::CyanHot, 220);
+        Theme::SoftRect(r, b.x + b.w - padIn - 8.f, b.y + b.h - padIn - btnH - 14.f, 8.f, 8.f, Theme::CyanHot, 220);
     }
 
     // ---- кнопки ----

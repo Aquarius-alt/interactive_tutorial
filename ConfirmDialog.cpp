@@ -144,7 +144,7 @@ void Confirm_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     // фон панели (с отступом, чтобы не торчал за скруглёнными углами рамки)
     SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
     const SDL_FRect bg = { px + 4, py + 4, kPanelW - 8, kPanelH - 8 };
-    SDL_RenderFillRect(r, &bg);
+    Theme::StyledFill(r, &bg);
 
     g_panel.x = px; g_panel.y = py; g_panel.hovered = false;
     TextButton_Draw(r, g_panel);
@@ -173,10 +173,10 @@ void Confirm_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     for (int i = 3; i >= 1; --i) {               // неоновая рамка вокруг спрайта
         SDL_SetRenderDrawColor(r, kR, kG, kB, Uint8(60 - i * 14));
         const SDL_FRect f = { sprite.x - i, sprite.y - i, sprite.w + 2 * i, sprite.h + 2 * i };
-        SDL_RenderRect(r, &f);
+        Theme::StyledStroke(r, &f);
     }
     SDL_SetRenderDrawColor(r, kR, kG, kB, 255);
-    SDL_RenderRect(r, &sprite);
+    Theme::StyledStroke(r, &sprite);
 
     DrawGlitchQ(r, x0 + sw + gap, rowTop + (sh - 16 * S) * 0.5f, S);
 

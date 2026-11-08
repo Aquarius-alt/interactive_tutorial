@@ -42,6 +42,8 @@ namespace {
     SDL_FRect g_achRect{ 0, 0, 0, 0 };    // область ленты (для колёсика и перетаскивания)
     bool      g_achDrag = false;          // лента тянется мышью
 
+    int RankTier(const std::string& rank);   // определена ниже (рамки рангов)
+
     void LoadAchievements(const std::string& login, long long totalXp, int level) {
         AchStats st;
         st.v[Stat_ReposDone] = Level_CompletedCount(login);
@@ -53,12 +55,57 @@ namespace {
         for (const TagLevel& t : tags)
             st.v[Stat_TopTagLevel] = std::max<long long>(st.v[Stat_TopTagLevel], Level_FromXp(t.xp).level);
         st.v[Stat_HasAvatar] = Avatar_Has() ? 1 : 0;
+
+        // ранги
+        const std::vector<RankEntry> ranks = Level_GetRanks(login);
+        st.v[Stat_RanksCount] = (long long)ranks.size();
+        for (const RankEntry& re : ranks) {
+            const int tier = RankTier(re.rank);
+            if (tier >= 1 && tier <= 5) st.v[Stat_TopRankTier] = std::max<long long>(st.v[Stat_TopRankTier], tier);
+        }
+        for (const TagLevel& t : tags) if (Level_FromXp(t.xp).level >= 10) ++st.v[Stat_TagsLv10];
+
+        // содержимое репозиториев (читается с диска при открытии профиля)
+        for (const RepoInfo& ri : RepoStore_List(login)) {
+            if (!ri.coverPath.empty()) ++st.v[Stat_ReposWithCover];
+            CreateData d;
+            if (!RepoStore_Load(ri.dir, d)) continue;
+            const long long th = (long long)d.theory.size(), te = (long long)d.tests.size(), ga = (long long)d.games.size();
+            st.v[Stat_TheoryCount] += th;
+            st.v[Stat_TestCount] += te;
+            st.v[Stat_GameCount] += ga;
+            if (th > 0 && te > 0 && ga > 0) ++st.v[Stat_FullStackRepos];
+            st.v[Stat_MaxRepoItems] = std::max(st.v[Stat_MaxRepoItems], th + te + ga);
+            st.v[Stat_MaxRepoXp] = std::max<long long>(st.v[Stat_MaxRepoXp], d.mainXp);
+            for (const TheoryItem& it : d.theory) {
+                st.v[Stat_FileCount] += (long long)it.files.size();
+                ++st.v[it.madeWithAI ? Stat_AiItems : Stat_HandItems];
+            }
+            for (const TheoryItem& it : d.tests) {
+                st.v[Stat_FileCount] += (long long)it.files.size();
+                st.v[Stat_QuestionCount] += (long long)it.questions.size();
+                ++st.v[it.madeWithAI ? Stat_AiItems : Stat_HandItems];
+            }
+            for (const TheoryItem& it : d.games) ++st.v[it.madeWithAI ? Stat_AiItems : Stat_HandItems];
+        }
+
+        // стили интерфейса (считает main.cpp)
+        st.v[Stat_UserStyles] = g_achUserStyles;
+        st.v[Stat_UserLooks] = g_achUserLooks;
         g_achStats = st;
 
         g_achOrder.clear();
         g_achUnlocked = 0;
         for (int i = 0; i < Ach_Count(); ++i) if (Ach_Unlocked(st, i)) { g_achOrder.push_back(i); ++g_achUnlocked; }
-        for (int i = 0; i < Ach_Count(); ++i) if (!Ach_Unlocked(st, i)) g_achOrder.push_back(i);
+        // закрытые: сначала те, до которых ближе всего
+        std::vector<int> locked;
+        for (int i = 0; i < Ach_Count(); ++i) if (!Ach_Unlocked(st, i)) locked.push_back(i);
+        std::stable_sort(locked.begin(), locked.end(), [&](int a, int b) {
+            const double fa = double(Ach_Value(st, a)) / double(Ach_Def(a).target);
+            const double fb = double(Ach_Value(st, b)) / double(Ach_Def(b).target);
+            return fa > fb;
+        });
+        g_achOrder.insert(g_achOrder.end(), locked.begin(), locked.end());
         g_achScroll = 0.f;
         g_achDrag = false;
     }
@@ -94,7 +141,7 @@ namespace {
 
     void FillRect(SDL_Renderer* r, const SDL_FRect& q, Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
         SDL_SetRenderDrawColor(r, cr, cg, cb, ca);
-        SDL_RenderFillRect(r, &q);
+        Theme::StyledFill(r, &q);
     }
 
     // ---------- рамки рангов ----------
@@ -169,7 +216,7 @@ namespace {
             for (int i = 1; i <= 4; ++i) {
                 SDL_SetRenderDrawColor(r, cr, cg, cb, Uint8(base * pulse * (1.f - float(i) / 5.f)));
                 const SDL_FRect g{ f.x - float(i), f.y - float(i), f.w + 2.f * float(i), f.h + 2.f * float(i) };
-                SDL_RenderRect(r, &g);
+                Theme::StyledStroke(r, &g);
             }
         }
 
@@ -194,14 +241,14 @@ namespace {
             br = Uint8(120 + 100 * k); bg2 = Uint8(225 + 30 * k); bb = 255;
         }
         SDL_SetRenderDrawColor(r, br, bg2, bb, 255);
-        SDL_RenderRect(r, &f);
+        Theme::StyledStroke(r, &f);
         const SDL_FRect in{ f.x + 1.f, f.y + 1.f, f.w - 2.f, f.h - 2.f };
         SDL_SetRenderDrawColor(r, br, bg2, bb, tier == 1 ? 150 : 200);
-        SDL_RenderRect(r, &in);
+        Theme::StyledStroke(r, &in);
         if (tier == 9) {                                                                       // чёрная рамка на тёмном фоне: тонкий серый контур снаружи, чтобы была видна
             const SDL_FRect out{ f.x - 1.f, f.y - 1.f, f.w + 2.f, f.h + 2.f };
             SDL_SetRenderDrawColor(r, 95, 95, 102, 255);
-            SDL_RenderRect(r, &out);
+            Theme::StyledStroke(r, &out);
         }
 
         // огонь: языки пламени растут вверх от верхней кромки рамки, плюс искры по бокам
@@ -232,7 +279,7 @@ namespace {
         const SDL_FRect bg{ x, y, w, kRowH };
         FillRect(r, bg, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 70);
-        SDL_RenderRect(r, &bg);
+        Theme::StyledStroke(r, &bg);
 
         const float pad = 10.f;
         const float c1 = std::clamp(w * 0.22f, 110.f, 220.f);    // колонка тега
@@ -242,7 +289,7 @@ namespace {
         const SDL_FRect tagBox{ x + pad, y + pad, c1 - pad, kRowH - 2.f * pad };
         FillRect(r, tagBox, 30, 34, 44, 255);
         SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 200);
-        SDL_RenderRect(r, &tagBox);
+        Theme::StyledStroke(r, &tagBox);
         DrawUtf8TextFit(r, row.tag, tagBox.x + 6.f, tagBox.y + tagBox.h * 0.5f, tagBox.w - 12.f, 24, true, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 255);
 
         // (2) название уровня
@@ -257,14 +304,14 @@ namespace {
             const SDL_FRect box{ x3, y + pad, sq, sq };
             FillRect(r, box, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
             SDL_SetRenderDrawColor(r, tr, tg, tb, 255);
-            SDL_RenderRect(r, &box);
+            Theme::StyledStroke(r, &box);
             DrawUtf8TextFit(r, std::to_string(row.info.level), box.x + 3.f, box.y + sq * 0.5f, sq - 6.f, 24, true, tr, tg, tb, 255);
 
             const float bx = x3 + sq + 12.f, bw = x + w - pad - bx;
             const SDL_FRect bar{ bx, y + pad + 6.f, bw, 18.f };
             FillRect(r, bar, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
             SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 110);
-            SDL_RenderRect(r, &bar);
+            Theme::StyledStroke(r, &bar);
             const float frac = row.info.xpNeed > 0 ? float(double(row.info.xpInto) / double(row.info.xpNeed)) : 0.f;
             if (frac > 0.f)
                 FillRect(r, { bar.x + 3.f, bar.y + 3.f, (bar.w - 6.f) * std::min(frac, 1.f), bar.h - 6.f }, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 210);
@@ -278,7 +325,7 @@ namespace {
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         FillRect(r, g_achRect, 26, 28, 36, 255);
         SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 110);
-        SDL_RenderRect(r, &g_achRect);
+        Theme::StyledStroke(r, &g_achRect);
 
         const std::string head = std::string(UiText("ACHIEVEMENTS", "ДОСТИЖЕНИЯ")) + "  " +
                                  std::to_string(g_achUnlocked) + " / " + std::to_string(Ach_Count());
@@ -305,7 +352,7 @@ namespace {
             const SDL_FRect card{ cx, cy, kAchCardW, kAchCardH };
             FillRect(r, card, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
             SDL_SetRenderDrawColor(r, cr, cg, cb, open ? 220 : 90);
-            SDL_RenderRect(r, &card);
+            Theme::StyledStroke(r, &card);
 
             const float tx = card.x + 8.f, tw = card.w - 16.f;
             DrawUtf8TextFit(r, UiText(d.titleEn, d.titleRu), tx, card.y + 14.f, tw, 16, false, cr, cg, cb, 255);
@@ -334,7 +381,7 @@ namespace {
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         FillRect(r, g_listRect, 26, 28, 36, 255);
         SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 110);
-        SDL_RenderRect(r, &g_listRect);
+        Theme::StyledStroke(r, &g_listRect);
 
         // заголовок списка
         const float headH = 34.f;
@@ -482,17 +529,17 @@ void Profile_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             const SDL_FRect box{ bx, by, sq, sq };
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-            SDL_RenderFillRect(r, &box);
+            Theme::StyledFill(r, &box);
             for (int i = 3; i >= 1; --i) {
                 const SDL_FRect g{ bx - i, by - i, sq + 2.f * i, sq + 2.f * i };
                 SDL_SetRenderDrawColor(r, tr, tg, tb, Uint8(26 / i));
-                SDL_RenderRect(r, &g);
+                Theme::StyledStroke(r, &g);
             }
             SDL_SetRenderDrawColor(r, tr, tg, tb, 255);
-            SDL_RenderRect(r, &box);
+            Theme::StyledStroke(r, &box);
             const SDL_FRect inner{ bx + 1.f, by + 1.f, sq - 2.f, sq - 2.f };
             SDL_SetRenderDrawColor(r, tr, tg, tb, 120);
-            SDL_RenderRect(r, &inner);
+            Theme::StyledStroke(r, &inner);
             DrawUtf8TextFit(r, std::to_string(g_level.level), bx + 6.f, by + sq * 0.5f, sq - 12.f, 32, true, tr, tg, tb, 255);
 
             // справа от квадратика: название группы и подпись "уровень"
@@ -505,14 +552,14 @@ void Profile_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             // шкала опыта под ними
             const SDL_FRect bar{ bx, by + sq + 16.f, rowW, 22.f };
             SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-            SDL_RenderFillRect(r, &bar);
+            Theme::StyledFill(r, &bar);
             SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 110);
-            SDL_RenderRect(r, &bar);
+            Theme::StyledStroke(r, &bar);
             const float frac = g_level.xpNeed > 0 ? float(double(g_level.xpInto) / double(g_level.xpNeed)) : 0.f;
             if (frac > 0.f) {
                 const SDL_FRect fill{ bar.x + 3.f, bar.y + 3.f, (bar.w - 6.f) * std::min(frac, 1.f), bar.h - 6.f };
                 SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 210);
-                SDL_RenderFillRect(r, &fill);
+                Theme::StyledFill(r, &fill);
             }
             const std::string xpText = std::to_string(g_level.xpInto) + " / " + std::to_string(g_level.xpNeed) + " XP";
             DrawUtf8TextFit(r, xpText, bx, bar.y + bar.h + 18.f, rowW, 16, false, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
@@ -557,7 +604,7 @@ void Profile_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             FillRect(r, box, 26, 28, 36, 255);
             SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 110);
-            SDL_RenderRect(r, &box);
+            Theme::StyledStroke(r, &box);
             DrawUtf8TextFit(r, UiText("RANKS", "РАНГИ"), 44.f, ly + 17.f, colW - 28.f, 16, false, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
             if (g_rankList.empty()) {
                 DrawUtf8TextFit(r, UiText("NO RANKS YET", "РАНГОВ ПОКА НЕТ"), 44.f, ly + 52.f, colW - 28.f, 16, false, 110, 140, 160, 255);

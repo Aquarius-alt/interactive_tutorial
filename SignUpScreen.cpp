@@ -2,6 +2,7 @@
 #include "TextField.h"
 #include "TextButton.h"
 #include "Text.h"
+#include "Theme.h"
 #include "ConfirmDialog.h"
 #include "SaveOverlay.h"
 #include "UserStore.h"
@@ -96,7 +97,7 @@ namespace {
         // тусклая дорожка
         SDL_SetRenderDrawColor(r, R, G, B, 28);
         SDL_FRect track = { x, y, w, h };
-        SDL_RenderFillRect(r, &track);
+        Theme::StyledFill(r, &track);
 
         // мягкое неоновое свечение: слои с убывающей прозрачностью
         const float pulse = 0.85f + 0.15f * std::sin(SDL_GetTicks() / 400.0f);
@@ -104,13 +105,13 @@ namespace {
             const float a = 34.f * (1.f - i / 9.f) * pulse;
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(a));
             SDL_FRect glow = { x - i, y - i, fw + i * 2, h + i * 2 };
-            SDL_RenderFillRect(r, &glow);
+            Theme::StyledFill(r, &glow);
         }
 
         // яркая сердцевина
         SDL_SetRenderDrawColor(r, R, G, B, 255);
         SDL_FRect core = { x, y, fw, h };
-        SDL_RenderFillRect(r, &core);
+        Theme::StyledFill(r, &core);
     }
 }
 

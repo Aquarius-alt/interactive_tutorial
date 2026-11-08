@@ -72,9 +72,17 @@ std::map<std::string, CachedText> g_textCache;
 SDL_Renderer* g_textRenderer=nullptr;
 float g_viewW = 0.f;      // ширина окна (задаётся в Opened_Draw): строки длиннее обрезаются с ".."
 
+// Средняя ширина символа при размере 16 (для переноса строк по числу символов).
+inline float CharW() {
+    // средняя ширина символа при размере 16 для каждого шрифта из TextDefaults::kFontNames (с запасом на кириллицу)
+    static const float w[] = { 16.f, 10.5f, 10.5f, 12.f, 10.5f, 10.8f, 11.f, 9.8f, 10.2f, 11.f };
+    const int id = TextDefaults::FontId;
+    return (id >= 0 && id < int(sizeof(w) / sizeof(w[0]))) ? w[id] : 10.5f;
+}
+
 // Конец строки, если она не влезает (для поля ответа: видно то, что печатаешь сейчас).
 std::string TailFit(const std::string& s, float maxW) {
-    const size_t fit = static_cast<size_t>(std::max(1.f, std::floor(maxW / 16.f)));
+    const size_t fit = static_cast<size_t>(std::max(1.f, std::floor(maxW / CharW())));
     size_t drop = Utf8Count(s) > fit ? Utf8Count(s) - fit : 0, pos = 0;
     while (pos < s.size() && drop) {
         const unsigned char c = static_cast<unsigned char>(s[pos]);
@@ -120,15 +128,21 @@ void Text(SDL_Renderer* r, const std::string& sIn, float x, float y,
         g_textRenderer = r;
     }
     const int fontHeight = std::max(8, static_cast<int>(16.0f * scale));
-    const std::string key = s + "\x1f" + std::to_string(fontHeight) + "\x1f" + std::to_string(alpha);
+    const bool helv = TextDefaults::Helvetica;   // стиль MINIMAL: Helvetica вместо Press Start 2P
+    const std::string key = std::to_string(TextDefaults::FontId) + "\x1e" + s + "\x1f" + std::to_string(fontHeight) + "\x1f" +
+        std::to_string(alpha) + "\x1f" + std::to_string(R) + "," + std::to_string(G) + "," + std::to_string(B);
     auto it = g_textCache.find(key);
     if (it == g_textCache.end()) {
         const std::wstring wide = Utf8ToWide(s);
         HDC dc = CreateCompatibleDC(nullptr);
         if (!dc) return;
-        HFONT font = CreateFontW(-fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-            FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Press Start 2P");
+        HFONT font = helv
+            ? CreateFontW(-(std::max)(11, (fontHeight * 9 + 4) / 8), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY, VARIABLE_PITCH | FF_SWISS, TextDefaults::FontFace())
+            : CreateFontW(-fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Press Start 2P");
         HGDIOBJ oldFont = SelectObject(dc, font);
         SIZE extent{};
         GetTextExtentPoint32W(dc, wide.c_str(), static_cast<int>(wide.size()), &extent);
@@ -222,7 +236,7 @@ void DrawVerdict(SDL_Renderer*r,float cx,float cy,bool ok){
         }
     }
 }
-void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?Theme::PanelHi.r:Theme::Panel.r,hot?Theme::PanelHi.g:Theme::Panel.g,hot?Theme::PanelHi.b:Theme::Panel.b,255); SDL_RenderFillRect(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); SDL_RenderRect(r,&q); }
+void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?Theme::PanelHi.r:Theme::Panel.r,hot?Theme::PanelHi.g:Theme::Panel.g,hot?Theme::PanelHi.b:Theme::Panel.b,255); Theme::StyledFill(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); Theme::StyledStroke(r,&q); }
 void AddHit(float x,float y,float w,float h,int type,int idx,int sub=-1){g_hits.push_back({{x,y,w,h},type,idx,sub});}
 bool In(const SDL_FRect&q,float x,float y){return x>=q.x&&x<=q.x+q.w&&y>=q.y&&y<=q.y+q.h;}
 
@@ -538,7 +552,7 @@ void Opened_Close(SDL_Window* window){ if(g_proc){ TerminateProcess(g_proc,1); C
 void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
  PollGame(); if(g_msgUntil&&SDL_GetTicks()>g_msgUntil){ g_gameMsg.clear(); g_msgUntil=0; } g_viewW=float(w); g_back.label=UiText("BACK","НАЗАД"); g_save.label=UiText("SAVE","СОХР.");
  g_hits.clear(); Text(r,UiText("OPENED REPOSITORY","ОТКРЫТЫЙ РЕПОЗИТОРИЙ"),20,22,1); Text(r,g_dir.substr(g_dir.find_last_of("/\\")+1),20,48,1,180);
- if(!g_gameMsg.empty()) Text(r,g_gameMsg,std::max(20.f,float(w)-20.f-16.f*float(Utf8Count(g_gameMsg))),48,1,200);
+ if(!g_gameMsg.empty()) Text(r,g_gameMsg,std::max(20.f,float(w)-20.f-Utf8TextWidth(g_gameMsg,16)),48,1,200);
  g_back.x=20.0f;g_back.y=static_cast<float>(h-62);TextButton_Draw(r,g_back);nd[ndCount++]=TextButton_Rect(g_back);
  g_save.x=static_cast<float>(w-188);g_save.y=static_cast<float>(h-62);g_save.hovered=g_dirty;TextButton_Draw(r,g_save);nd[ndCount++]=TextButton_Rect(g_save);
  // шкала выполнения между НАЗАД и СОХР.: (изученные конспекты + верные ответы) / (все конспекты + вопросы, у которых задан верный ответ)
@@ -560,7 +574,7 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
        const SDL_FRect fill{bar.x+3.f,bar.y+3.f,(bar.w-6.f)*float(pct)/100.f,bar.h-6.f};
        SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
        if(pct>=100) SDL_SetRenderDrawColor(r,90,230,120,210); else SDL_SetRenderDrawColor(r,R,G,B,210);
-       SDL_RenderFillRect(r,&fill);
+       Theme::StyledFill(r,&fill);
      }
      Text(r,std::to_string(pct)+"%",bx+bw+12.f,float(h)-51.f);
    }
@@ -572,7 +586,7 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
  g_viewTopY=viewTop; g_viewBotY=viewBot;
  const float x=20.f, width=std::max(120.f,float(w)-40.f-16.f);     // 16 px справа - под ползунок
  const float rowRight=x+width;
- auto charsFor=[&](float from,float to){ return static_cast<size_t>(std::max(1.f,std::floor((to-from)/16.f))); };
+ auto charsFor=[&](float from,float to){ return static_cast<size_t>(std::max(1.f,std::floor((to-from)/CharW()))); };
  auto vis=[&](float top,float hh){ return top+hh>viewTop&&top<viewBot; };
  float y=0.f;
 
@@ -676,12 +690,12 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
        std::string res=UiText("NOT PLAYED","НЕ ИГРАЛИ");
        if(g_proc&&g_procGame==int(i)) res=UiText("RUNNING","ИДЁТ ИГРА");
        else if(i<g_gameRes.size()&&g_gameRes[i].played) res=std::to_string(g_gameRes[i].score)+"/"+std::to_string(g_gameRes[i].max)+(g_gameRes[i].completed?"":" *");
-       const std::vector<std::string> lines=WrapPrefixed("> ",g_games[i].title,charsFor(x+18,rowRight-18-16.f*float(Utf8Count(res)+2)));
+       const std::vector<std::string> lines=WrapPrefixed("> ",g_games[i].title,charsFor(x+18,rowRight-18-(Utf8TextWidth(res,16)+32.f)));
        const float H=std::max(34.f,float(lines.size())*18.f+16.f);
        if(draw&&vis(y,H)){
          SDL_FRect q{x+8,y,width-16,H}; Rect(r,q,In(q,float(g_mx),float(g_my)));
          for(size_t k=0;k<lines.size();++k) Text(r,lines[k],x+18,y+10.f+float(k)*18.f);
-         Text(r,res,q.x+q.w-10.f-16.f*float(Utf8Count(res)),y+10.f,1,170);
+         Text(r,res,q.x+q.w-10.f-Utf8TextWidth(res,16),y+10.f,1,170);
          AddHit(q.x,q.y,q.w,q.h,11,int(i));
        }
        y+=H+6.f;
@@ -705,13 +719,13 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
    const float travel=g_track.h-thumbH;
    g_thumb={g_track.x,g_track.y+travel*float(g_scroll)/float(g_maxScroll),g_track.w,thumbH};
    SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND);
-   SDL_SetRenderDrawColor(r,R,G,B,40); SDL_RenderFillRect(r,&g_track);   // дорожка
+   SDL_SetRenderDrawColor(r,R,G,B,40); Theme::StyledFill(r,&g_track);   // дорожка
    const bool hot=g_drag||In(g_thumb,float(g_mx),float(g_my));
    for(int i=3;i>=1;--i){                                                // мягкое свечение вокруг ползунка
      SDL_SetRenderDrawColor(r,R,G,B,Uint8((hot?40:26)*(1.f-i/4.f)));
-     const SDL_FRect gl{g_thumb.x-i,g_thumb.y-i,g_thumb.w+2.f*i,g_thumb.h+2.f*i}; SDL_RenderFillRect(r,&gl);
+     const SDL_FRect gl{g_thumb.x-i,g_thumb.y-i,g_thumb.w+2.f*i,g_thumb.h+2.f*i}; Theme::StyledFill(r,&gl);
    }
-   SDL_SetRenderDrawColor(r,hot?Theme::CyanHot.r:R,hot?Theme::CyanHot.g:G,Theme::CyanHot.b,255); SDL_RenderFillRect(r,&g_thumb);
+   SDL_SetRenderDrawColor(r,hot?Theme::CyanHot.r:R,hot?Theme::CyanHot.g:G,Theme::CyanHot.b,255); Theme::StyledFill(r,&g_thumb);
  } else g_drag=false;
  nd[ndCount++]={20,int(viewTop),w-40,int(viewBot-viewTop)};
 
@@ -727,7 +741,7 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
    const float dw=std::max(1.f,std::floor(float(g_viewSurf->w)*sc)), dh=std::max(1.f,std::floor(float(g_viewSurf->h)*sc));
    const SDL_FRect dst{std::floor((float(w)-dw)*0.5f),std::floor(70.f+(availH-dh)*0.5f),dw,dh};
    SDL_RenderTexture(r,g_viewTex,nullptr,&dst);
-   SDL_SetRenderDrawColor(r,R,G,B,140); const SDL_FRect fr{dst.x-3.f,dst.y-3.f,dst.w+6.f,dst.h+6.f}; SDL_RenderRect(r,&fr);
+   SDL_SetRenderDrawColor(r,R,G,B,140); const SDL_FRect fr{dst.x-3.f,dst.y-3.f,dst.w+6.f,dst.h+6.f}; Theme::StyledStroke(r,&fr);
    Text(r,BaseNameOf(g_viewPath),20,22,1);
    g_viewClose.label=UiText("CLOSE","ЗАКРЫТЬ"); g_viewExt.label=UiText("OPEN","ОТКРЫТЬ");
    g_viewClose.w=std::max(130.f,Utf8TextWidth(g_viewClose.label,16)+32.f); g_viewExt.w=std::max(130.f,Utf8TextWidth(g_viewExt.label,16)+32.f);

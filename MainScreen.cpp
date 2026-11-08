@@ -328,14 +328,14 @@ namespace {
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(34.f * (1.f - i / 6.f)));
             const SDL_FRect hor = { cx - len / 2 - i, cy - th / 2 - i, len + 2.f * i, th + 2.f * i };
             const SDL_FRect ver = { cx - th / 2 - i, cy - len / 2 - i, th + 2.f * i, len + 2.f * i };
-            SDL_RenderFillRect(r, &hor);
-            SDL_RenderFillRect(r, &ver);
+            Theme::StyledFill(r, &hor);
+            Theme::StyledFill(r, &ver);
         }
         SDL_SetRenderDrawColor(r, R, G, B, 255);
         const SDL_FRect hor = { cx - len / 2, cy - th / 2, len, th };
         const SDL_FRect ver = { cx - th / 2, cy - len / 2, th, len };
-        SDL_RenderFillRect(r, &hor);
-        SDL_RenderFillRect(r, &ver);
+        Theme::StyledFill(r, &hor);
+        Theme::StyledFill(r, &ver);
     }
 
     // подпись по центру (cx), с мягким свечением; при наведении светлее
@@ -371,7 +371,7 @@ namespace {
         else {                                                    // обложки нет: тонкий пустой квадрат
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 90);
-            SDL_RenderRect(r, &box);
+            Theme::StyledStroke(r, &box);
         }
         DrawCardName(r, c.name, x + kCardW * 0.5f, box.y + S + 12.f, kCardW - 20.f);
     }
@@ -379,6 +379,11 @@ namespace {
     // Заливка скруглённого прямоугольника (по строкам): закрывает всё под рамкой вплоть до самого края,
     // но не торчит за скруглёнными углами. Нужна, чтобы карточка под списком не просвечивала.
     void FillRounded(SDL_Renderer* r, const SDL_FRect& rc, float rad) {
+        if (Theme::Cute()) {   // PRO CUTE: сглаженное скругление вместо ступенек из строк
+            Uint8 cr = 0, cg = 0, cb = 0, ca = 255;
+            SDL_GetRenderDrawColor(r, &cr, &cg, &cb, &ca);
+            if (CuteGfx::RoundFill(r, rc.x, rc.y, rc.w, rc.h, std::max(rad, 10.f), cr, cg, cb, ca)) return;
+        }
         const int rows = int(std::ceil(rc.h));
         for (int i = 0; i < rows; ++i) {
             const float fromEdge = std::min(float(i) + 0.5f, rc.h - float(i) - 0.5f);
@@ -517,21 +522,21 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             const SDL_FRect box{ lx, cy - sq * 0.5f, boxW, sq };
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-            SDL_RenderFillRect(r, &box);
+            Theme::StyledFill(r, &box);
             SDL_SetRenderDrawColor(r, tr, tg, tb, 255);
-            SDL_RenderRect(r, &box);
+            Theme::StyledStroke(r, &box);
             DrawUtf8TextFit(r, lvl, lx + 2.f, cy, boxW - 4.f, lvlFont, true, tr, tg, tb, 255);
 
             const SDL_FRect bar{ bx, cy - 8.f, bw, 16.f };
             SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-            SDL_RenderFillRect(r, &bar);
+            Theme::StyledFill(r, &bar);
             SDL_SetRenderDrawColor(r, tr, tg, tb, 110);
-            SDL_RenderRect(r, &bar);
+            Theme::StyledStroke(r, &bar);
             const float frac = g_level.xpNeed > 0 ? float(double(g_level.xpInto) / double(g_level.xpNeed)) : 0.f;
             if (frac > 0.f) {
                 const SDL_FRect fill{ bar.x + 3.f, bar.y + 3.f, (bar.w - 6.f) * std::min(frac, 1.f), bar.h - 6.f };
                 SDL_SetRenderDrawColor(r, tr, tg, tb, 210);      // шкала цвета группы уровня
-                SDL_RenderFillRect(r, &fill);
+                Theme::StyledFill(r, &fill);
             }
         }
     }
@@ -587,15 +592,15 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 40);            // дорожка
-            SDL_RenderFillRect(r, &g_track);
+            Theme::StyledFill(r, &g_track);
             const bool hot = g_drag || InsideF(g_thumb, g_mx, g_my);
             for (int i = 3; i >= 1; --i) {                        // мягкое свечение вокруг ползунка
                 SDL_SetRenderDrawColor(r, kR, kG, kB, Uint8((hot ? 40 : 26) * (1.f - i / 4.f)));
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
-                SDL_RenderFillRect(r, &gl);
+                Theme::StyledFill(r, &gl);
             }
             SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
-            SDL_RenderFillRect(r, &g_thumb);
+            Theme::StyledFill(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }
     }
@@ -614,9 +619,9 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);                      // фон, чтобы карточки не просвечивали
-        SDL_RenderFillRect(r, &g_cmRect);
+        Theme::StyledFill(r, &g_cmRect);
         SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
-        SDL_RenderRect(r, &g_cmRect);
+        Theme::StyledStroke(r, &g_cmRect);
 
         g_cmDelete.x = g_cmEdit.x = g_cmOpen.x = mx + kCmPad;
         g_cmDelete.y = my + kCmPad;
@@ -674,7 +679,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         // фон окна (с отступом, чтобы не торчал за скруглёнными углами рамки)
         SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         const SDL_FRect bg = { px + 4, py + 4, pw - 8, ph - 8 };
-        SDL_RenderFillRect(r, &bg);
+        Theme::StyledFill(r, &bg);
 
         g_addPanel.x = px; g_addPanel.y = py; g_addPanel.w = pw; g_addPanel.h = ph;
         g_addPanel.hovered = false;

@@ -169,7 +169,7 @@ namespace {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             if (hot) {                                         // под курсором: мягкая подложка и светлее
                 SDL_SetRenderDrawColor(r, kR, kG, kB, 45);
-                SDL_RenderFillRect(r, &d);
+                Theme::StyledFill(r, &d);
             }
             SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
             const float dot = 4.f, gap = 4.f;
@@ -177,7 +177,7 @@ namespace {
             const float y0 = std::floor(d.y + (d.h - dot) * 0.5f);
             for (int i = 0; i < 3; ++i) {
                 const SDL_FRect p = { x0 + float(i) * (dot + gap), y0, dot, dot };
-                SDL_RenderFillRect(r, &p);
+                Theme::StyledFill(r, &p);
             }
         }
     }
@@ -345,14 +345,14 @@ namespace {
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(34.f * (1.f - i / 6.f)));
             const SDL_FRect hor = { cx - len / 2 - i, cy - th / 2 - i, len + 2.f * i, th + 2.f * i };
             const SDL_FRect ver = { cx - th / 2 - i, cy - len / 2 - i, th + 2.f * i, len + 2.f * i };
-            SDL_RenderFillRect(r, &hor);
-            SDL_RenderFillRect(r, &ver);
+            Theme::StyledFill(r, &hor);
+            Theme::StyledFill(r, &ver);
         }
         SDL_SetRenderDrawColor(r, R, G, B, 255);
         const SDL_FRect hor = { cx - len / 2, cy - th / 2, len, th };
         const SDL_FRect ver = { cx - th / 2, cy - len / 2, th, len };
-        SDL_RenderFillRect(r, &hor);
-        SDL_RenderFillRect(r, &ver);
+        Theme::StyledFill(r, &hor);
+        Theme::StyledFill(r, &ver);
     }
 
     // заглушка в квадрате картинки: плюс и подпись AVATAR
@@ -365,8 +365,8 @@ namespace {
         SDL_SetRenderDrawColor(r, R, G, B, 255);
         const SDL_FRect hor = { std::floor(cx - len * 0.5f), std::floor(cy - th * 0.5f), std::ceil(len), std::ceil(th) };
         const SDL_FRect ver = { std::floor(cx - th * 0.5f), std::floor(cy - len * 0.5f), std::ceil(th), std::ceil(len) };
-        SDL_RenderFillRect(r, &hor);
-        SDL_RenderFillRect(r, &ver);
+        Theme::StyledFill(r, &hor);
+        Theme::StyledFill(r, &ver);
 
         const int fontHeight = (S >= 110.f) ? 16 : 8;
         const std::string label = UiText("AVATAR", "АВАТАР");
@@ -563,7 +563,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 40);
             const SDL_FRect fill = { t.x + 4.f, t.y + 4.f, t.w - 8.f, t.h - 8.f };
-            SDL_RenderFillRect(r, &fill);
+            Theme::StyledFill(r, &fill);
         }
         t.hovered = selected || Inside(t, g_mx, g_my);
         TextButton_Draw(r, t);
@@ -649,9 +649,9 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);                  // фон, чтобы текст карточек не просвечивал
-            SDL_RenderFillRect(r, &g_menuRect);
+            Theme::StyledFill(r, &g_menuRect);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
-            SDL_RenderRect(r, &g_menuRect);
+            Theme::StyledStroke(r, &g_menuRect);
 
             g_menuEdit.x = mx + pad; g_menuEdit.y = my + pad;
             g_menuDel.x = mx + pad;  g_menuDel.y = my + pad + itemH + itemGap;
@@ -675,15 +675,15 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 40);        // дорожка
-            SDL_RenderFillRect(r, &g_track);
+            Theme::StyledFill(r, &g_track);
             const bool hot = g_drag || InsideF(g_thumb, g_mx, g_my);
             for (int i = 3; i >= 1; --i) {                    // мягкое свечение вокруг ползунка
                 SDL_SetRenderDrawColor(r, kR, kG, kB, Uint8((hot ? 40 : 26) * (1.f - i / 4.f)));
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
-                SDL_RenderFillRect(r, &gl);
+                Theme::StyledFill(r, &gl);
             }
             SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
-            SDL_RenderFillRect(r, &g_thumb);
+            Theme::StyledFill(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }
     }

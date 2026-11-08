@@ -140,8 +140,10 @@ inline void DrawSplashFrame(SDL_Renderer* r, int w, int h, float el, float glitc
     }
 
     // лёгкие строки развёртки, как на остальных экранах
-    Theme::SetColor(r, Theme::Rgb{ 0, 0, 0 }, 40);
-    for (int y = 1; y < h; y += 4) SDL_RenderLine(r, 0.f, float(y), fw, float(y));
+    if (!Theme::Minimal) {
+        Theme::SetColor(r, Theme::Rgb{ 0, 0, 0 }, 40);
+        for (int y = 1; y < h; y += 4) SDL_RenderLine(r, 0.f, float(y), fw, float(y));
+    }
 }
 
 // Нарисовать горизонтальную полосу [y, y+bh) текстуры со сдвигом dx (с «заворотом» по краям).

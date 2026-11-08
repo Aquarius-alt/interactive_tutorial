@@ -3,6 +3,17 @@
 // Иконка exe (и окна в панели задач). Идентификатор 1 SDL использует как иконку окна по умолчанию.
 1 ICON "mark.ico"
 
+// PRO CUTE wallpapers (see Wallpapers.h): RCDATA 301..309, loaded from the exe at runtime.
+301 RCDATA "wallpapers/wp01.png"
+302 RCDATA "wallpapers/wp02.png"
+303 RCDATA "wallpapers/wp03.png"
+304 RCDATA "wallpapers/wp04.png"
+305 RCDATA "wallpapers/wp05.png"
+306 RCDATA "wallpapers/wp06.png"
+307 RCDATA "wallpapers/wp07.png"
+308 RCDATA "wallpapers/wp08.png"
+309 RCDATA "wallpapers/wp09.png"
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,0,0,0
  PRODUCTVERSION 1,0,0,0

@@ -257,6 +257,11 @@ namespace {
         const SDL_FRect q{ x, y, w, h };
         SDL_RenderFillRect(r, &q);
     }
+    // фон окна-панели: в стиле PRO CUTE скруглённый, чтобы не торчать за углами рамки
+    void FillPanel(SDL_Renderer* r, float x, float y, float w, float h) {
+        const SDL_FRect q{ x, y, w, h };
+        Theme::StyledFill(r, &q);
+    }
 }
 
 void Ranks_Open(SDL_Window* window, const std::string& login) {
@@ -355,7 +360,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         const float px = std::floor((float(w) - kPwW) * 0.5f), py = std::floor((float(h) - kPwH) * 0.5f);
         SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-        FillR(r, px + 4.f, py + 4.f, kPwW - 8.f, kPwH - 8.f);
+        FillPanel(r, px + 4.f, py + 4.f, kPwW - 8.f, kPwH - 8.f);
         g_pwPanel.x = px; g_pwPanel.y = py; g_pwPanel.hovered = false;
         TextButton_Draw(r, g_pwPanel);
         nd[ndCount++] = TextButton_Rect(g_pwPanel);
@@ -394,7 +399,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         const float btnH = 40.f, gap = 12.f;
 
         SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
-        FillR(r, px + 4.f, py + 4.f, pw - 8.f, ph - 8.f);
+        FillPanel(r, px + 4.f, py + 4.f, pw - 8.f, ph - 8.f);
         g_tPanel.x = px; g_tPanel.y = py; g_tPanel.w = pw; g_tPanel.h = ph; g_tPanel.hovered = false;
         TextButton_Draw(r, g_tPanel);
         nd[ndCount++] = TextButton_Rect(g_tPanel);

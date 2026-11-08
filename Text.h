@@ -8,6 +8,18 @@
 namespace TextDefaults {
     inline Uint8 AccentR = 96, AccentG = 228, AccentB = 232;   // = Theme::Cyan
     inline Uint8 InkR = 200, InkG = 240, InkB = 255;           // обычный светлый текст
+    // Шрифты интерфейса. 0 = Press Start 2P (моноширинный, пиксельный), остальные - обычные пропорциональные
+    // шрифты Windows (кириллица есть у всех). Если шрифта нет в системе, Windows подставит похожий.
+    inline const wchar_t* const kFontFaces[] = {
+        L"Press Start 2P", L"Helvetica", L"Segoe UI", L"Verdana", L"Tahoma",
+        L"Trebuchet MS", L"Georgia", L"Times New Roman", L"Consolas", L"Courier New" };
+    inline const char* const kFontNames[] = {
+        "PIXEL", "HELVETICA", "SEGOE UI", "VERDANA", "TAHOMA",
+        "TREBUCHET", "GEORGIA", "TIMES", "CONSOLAS", "COURIER" };
+    constexpr int kFontCount = int(sizeof(kFontNames) / sizeof(kFontNames[0]));
+    inline int FontId = 0;           // номер текущего шрифта (его задаёт стиль, Styles::Apply)
+    inline bool Helvetica = false;   // true = любой пропорциональный шрифт (FontId != 0), false = Press Start 2P
+    inline const wchar_t* FontFace() { return kFontFaces[(FontId >= 0 && FontId < kFontCount) ? FontId : 0]; }
 }
 
 void DrawCenteredText(SDL_Renderer* r, const char* text, int w, int h,

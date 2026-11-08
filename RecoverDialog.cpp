@@ -96,19 +96,19 @@ namespace {
             const float a = std::min(255.f, 46.f * strength * (1.f - i / 7.f));
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(a));
             const SDL_FRect g = { rc.x - i, rc.y - i, rc.w + 2.f * i, rc.h + 2.f * i };
-            SDL_RenderRect(r, &g);
+            Theme::StyledStroke(r, &g);
         }
         SDL_SetRenderDrawColor(r, R, G, B, 255);
-        SDL_RenderRect(r, &rc);
+        Theme::StyledStroke(r, &rc);
         const SDL_FRect in = { rc.x + 1.f, rc.y + 1.f, rc.w - 2.f, rc.h - 2.f };
-        SDL_RenderRect(r, &in);
+        Theme::StyledStroke(r, &in);
     }
 
     void DrawBtn(SDL_Renderer* r, const Btn& b, const char* label) {
         const SDL_FRect rc = { b.x, b.y, b.w, b.h };
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, GR, GG, GB, b.hover ? 70 : 24);
-        SDL_RenderFillRect(r, &rc);
+        Theme::StyledFill(r, &rc);
         NeonRect(r, rc, GR, GG, GB, b.hover ? 1.6f : 1.f);
 
         // подпись всегда внутри кнопки: мельче, а если и так не влезает - с ".."
@@ -157,17 +157,17 @@ namespace {
         const SDL_FRect box = { x, y, W, kBarH };
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, 18, 8, 12, 215);
-        SDL_RenderFillRect(r, &box);
+        Theme::StyledFill(r, &box);
 
         const float fw = std::floor((W - 4.f) * p);
         if (fw >= 1.f) {
             SDL_SetRenderDrawColor(r, R, G, B, 255);
             const SDL_FRect fill = { x + 2.f, y + 2.f, fw, kBarH - 4.f };
-            SDL_RenderFillRect(r, &fill);
+            Theme::StyledFill(r, &fill);
             if (live && p < 1.f) {                                // яркая «голова»
                 SDL_SetRenderDrawColor(r, 230, 255, 255, 255);
                 const SDL_FRect head = { x + 2.f + fw - 2.f, y + 2.f, 2.f, kBarH - 4.f };
-                SDL_RenderFillRect(r, &head);
+                Theme::StyledFill(r, &head);
             }
         }
         NeonRect(r, box, R, G, B, 1.f);
@@ -302,9 +302,9 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
     // фон: тёмная подложка (чтобы не просвечивал экран под окном) и полупрозрачный зелёный
     SDL_SetRenderDrawColor(r, 0, 0, 0, 215);
-    SDL_RenderFillRect(r, &panel);
+    Theme::StyledFill(r, &panel);
     SDL_SetRenderDrawColor(r, GR, GG, GB, 46);
-    SDL_RenderFillRect(r, &panel);
+    Theme::StyledFill(r, &panel);
     NeonRect(r, panel, GR, GG, GB, 1.f);
 
     // заголовок
@@ -330,7 +330,7 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         // поле ввода
         const SDL_FRect fr = { bx, py + 96.f, bw, 40.f };
         SDL_SetRenderDrawColor(r, GR, GG, GB, 20);
-        SDL_RenderFillRect(r, &fr);
+        Theme::StyledFill(r, &fr);
         NeonRect(r, fr, GR, GG, GB, 1.3f);
 
         const float cs = float(SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE) * 2.f;

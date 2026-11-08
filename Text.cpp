@@ -1,4 +1,5 @@
 #include "Text.h"
+#include "Theme.h"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -27,6 +28,45 @@ std::wstring ToWide(const std::string& value) {
     return out;
 }
 
+// Helvetica в Windows подменяется на Arial (так задано в FontSubstitutes), кириллица там есть.
+// Размер Helvetica берём чуть больше размера ячейки Press Start 2P: его буквы заметно мельче.
+int HelveticaPx(int fontHeight) { return std::max(11, (fontHeight * 9 + 4) / 8); }
+
+HFONT MakeFont(int fontHeight, bool helv) {
+    if (helv)   // любой пропорциональный шрифт из TextDefaults::kFontFaces
+        return CreateFontW(-HelveticaPx(fontHeight), 0, 0, 0, FW_NORMAL,
+            FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, VARIABLE_PITCH | FF_SWISS,
+            TextDefaults::FontFace());
+    return CreateFontW(-std::max(8, fontHeight), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN,
+        L"Press Start 2P");
+}
+
+// Ширина строки в пикселях для пропорционального шрифта (с кэшем, GDI дорогой).
+float MeasureHelvetica(const std::string& text, int fontHeight) {
+    if (text.empty()) return 0.f;
+    static std::map<std::string, float> cache;
+    const std::string key = std::to_string(TextDefaults::FontId) + "\x1e" + std::to_string(fontHeight) + "\x1f" + text;
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    float width = 0.f;
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (dc) {
+        HFONT font = MakeFont(fontHeight, true);
+        HGDIOBJ old = SelectObject(dc, font);
+        const std::wstring wide = ToWide(text);
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, wide.c_str(), static_cast<int>(wide.size()), &extent);
+        width = static_cast<float>(extent.cx);
+        SelectObject(dc, old); DeleteObject(font); DeleteDC(dc);
+    }
+    if (cache.size() > 4000) cache.clear();
+    cache.emplace(key, width);
+    return width;
+}
+
 void DrawRaw(SDL_Renderer* r, const std::string& s, float x, float y,
     int fontHeight, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
     if (!r || s.empty()) return;
@@ -35,17 +75,15 @@ void DrawRaw(SDL_Renderer* r, const std::string& s, float x, float y,
         g_cache.clear();
         g_renderer = r;
     }
-    const std::string key = s + "\x1f" + std::to_string(fontHeight) + "\x1f" +
+    const bool helv = TextDefaults::Helvetica;
+    const std::string key = std::to_string(TextDefaults::FontId) + "\x1e" + s + "\x1f" + std::to_string(fontHeight) + "\x1f" +
         std::to_string(red) + "," + std::to_string(green) + "," + std::to_string(blue);
     auto it = g_cache.find(key);
     if (it == g_cache.end()) {
         const std::wstring wide = ToWide(s);
         HDC dc = CreateCompatibleDC(nullptr);
         if (!dc) return;
-        HFONT font = CreateFontW(-std::max(8, fontHeight), 0, 0, 0, FW_NORMAL,
-            FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN,
-            L"Press Start 2P");
+        HFONT font = MakeFont(fontHeight, helv);
         HGDIOBJ oldFont = SelectObject(dc, font);
         SIZE extent{};
         GetTextExtentPoint32W(dc, wide.c_str(), static_cast<int>(wide.size()), &extent);
@@ -90,9 +128,18 @@ void DrawRaw(SDL_Renderer* r, const std::string& s, float x, float y,
         if (!texture) return;
         it = g_cache.emplace(key, CachedText{ texture, tw, th }).first;
     }
-    SDL_SetTextureAlphaMod(it->second.texture, alpha);
-    SDL_FRect dst{ x, y, static_cast<float>(it->second.w), static_cast<float>(it->second.h) };
-    SDL_RenderTexture(r, it->second.texture, nullptr, &dst);
+    SDL_Texture* tex = it->second.texture;
+    const float tw = static_cast<float>(it->second.w), th = static_cast<float>(it->second.h);
+    if (Theme::Cute() && alpha > 40) {   // PRO CUTE: мягкая сливовая тень под буквами - читаются на любых обоях
+        SDL_SetTextureColorMod(tex, 40, 12, 52);
+        SDL_SetTextureAlphaMod(tex, static_cast<Uint8>(alpha * 0.55f));
+        const SDL_FRect shadow{ x + 1.f, y + (fontHeight >= 16 ? 2.f : 1.f), tw, th };
+        SDL_RenderTexture(r, tex, nullptr, &shadow);
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
+    }
+    SDL_SetTextureAlphaMod(tex, alpha);
+    SDL_FRect dst{ x, y, tw, th };
+    SDL_RenderTexture(r, tex, nullptr, &dst);
 }
 }
 
@@ -102,6 +149,7 @@ int NormalizeTextFontHeight(int fontHeight) {
 }
 
 float Utf8TextWidth(const std::string& text, int fontHeight) {
+    if (TextDefaults::Helvetica) return MeasureHelvetica(text, NormalizeTextFontHeight(fontHeight));
     // Press Start 2P is monospaced: one character cell is one em wide.
     return static_cast<float>(Utf8Count(text)) *
         static_cast<float>(NormalizeTextFontHeight(fontHeight));
@@ -149,6 +197,12 @@ int FitFontHeight(const std::string& text, float maxWidth, int preferred) {
 }
 
 std::string Utf8Fit(const std::string& text, float maxWidth, int fontHeight) {
+    if (TextDefaults::Helvetica) {
+        if (Utf8TextWidth(text, fontHeight) <= maxWidth) return text;
+        std::string cut = text;
+        while (!cut.empty() && Utf8TextWidth(cut + "..", fontHeight) > maxWidth) Utf8PopBack(cut);
+        return cut + "..";
+    }
     const float cell = static_cast<float>(NormalizeTextFontHeight(fontHeight));
     const size_t fit = static_cast<size_t>(std::max(1.f, std::floor(maxWidth / cell)));
     const size_t count = Utf8Count(text);
