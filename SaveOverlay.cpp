@@ -2,6 +2,7 @@
 #include "UserStore.h"
 #include "Text.h"
 #include "Localization.h"
+#include "Theme.h"
 #include <atomic>
 #include <thread>
 #include <cmath>
@@ -316,7 +317,7 @@ void SaveOverlay_Draw(SDL_Renderer* r, int w, int h) {
         const float lwPx = W * lw;
         const float lx = std::round(cx - lwPx * 0.5f);
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, 96, 228, 232, Uint8(70.f * la));
+        SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, Uint8(70.f * la));
         const SDL_FRect glow = { lx, cy - 4.f, lwPx, 8.f };
         SDL_RenderFillRect(r, &glow);
         SDL_SetRenderDrawColor(r, 230, 255, 255, Uint8(255.f * la));

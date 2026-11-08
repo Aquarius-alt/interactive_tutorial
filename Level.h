@@ -26,10 +26,12 @@ void        Level_TierColor(int tier, unsigned char& r, unsigned char& g, unsign
 long long Level_GetXp(const std::string& login);                 // суммарный опыт (0, если файла нет)
 bool      Level_AddXp(const std::string& login, long long xp);   // прибавить опыт; true = записано
 
-// Зачёт опыта за выполненный репозиторий: один раз на репозиторий (ключ - имя его папки).
-// true = опыт только что начислен; false = уже начислялся раньше, xp <= 0 или не записалось.
-// Список зачтённых репозиториев: %APPDATA%\myproject\login\xpdone_<hex логина>.dat
-bool      Level_AwardRepo(const std::string& login, const std::string& repoKey, long long xp);
+// Зачёт опыта за репозиторий (ключ - имя его папки). Опыт идёт долями: percent - текущая доля выполнения (0..100),
+// положено xp * percent / 100, а уже выданное вычитается. Например, при xp = 100: 50% -> +50, потом 100% -> ещё +50.
+// Выданное не отбирается, если доля потом упала. При 100% репозиторий считается выполненным и больше не начисляется.
+// Возвращает, сколько опыта выдано сейчас (0 = ничего: нечего добавлять, xp <= 0 или не записалось).
+// Выполненные репозитории: %APPDATA%\myproject\login\xpdone_<hex логина>.dat, частичные начисления: xppart_<hex логина>.dat
+long long Level_AwardRepo(const std::string& login, const std::string& repoKey, long long xp, int percent = 100);
 
 // ---- Уровни по тегам предметов ----
 // Опыт предмета (subjectXp репозитория) копится отдельно по тегу (без учёта регистра) и считается
@@ -40,11 +42,11 @@ struct TagLevel {
 };
 std::vector<TagLevel> Level_GetTags(const std::string& login);   // от большего опыта к меньшему
 
-// Зачёт опыта предмета за выполненный репозиторий (один раз на репозиторий и логин).
-// Теги через ";" ("math; python") - разные теги, каждый получает полный xp.
-// true = начислено; пустой тег или xp <= 0 - ничего не делает.
-bool Level_AwardSubject(const std::string& login, const std::string& repoKey,
-                        const std::string& tag, long long xp);
+// Зачёт опыта предмета за репозиторий: так же долями по percent (см. Level_AwardRepo), без повторов.
+// Теги через ";" ("math; python") - разные теги, каждый получает свою долю xp.
+// Возвращает, сколько выдано каждому тегу сейчас; пустой тег или xp <= 0 - ничего не делает.
+long long Level_AwardSubject(const std::string& login, const std::string& repoKey,
+                             const std::string& tag, long long xp, int percent = 100);
 
 // Сколько репозиториев засчитано как выполненные (с ненулевым опытом за выполнение).
 int Level_CompletedCount(const std::string& login);

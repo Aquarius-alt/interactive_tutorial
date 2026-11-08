@@ -4,6 +4,7 @@
 #include "Text.h"
 #include "TextArea.h"
 #include "Localization.h"
+#include "Theme.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -11,7 +12,7 @@
 #include <string>
 
 namespace {
-    const Uint8  kR = 96, kG = 228, kB = 232;     // цвет неона, как у кнопок
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;     // цвет неона, как у кнопок
     const size_t kTitleMax = 60;
     const size_t kBodyMax = 3000;
     const size_t kMaxFiles = 10;
@@ -145,7 +146,7 @@ namespace {
     void DrawPlusSign(SDL_Renderer* r, const TextButton& b) {
         const float cx = std::floor(b.x + b.w * 0.5f), cy = std::floor(b.y + b.h * 0.5f);
         const float len = 18.f, th = 3.f;
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         for (int i = 3; i >= 1; --i) {
             SDL_SetRenderDrawColor(r, R, G, B, Uint8(34.f * (1.f - i / 4.f)));
@@ -496,7 +497,7 @@ void Theory_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     const float btnH = 40.f;
 
     // фон окна (с отступом, чтобы не торчал за скруглёнными углами рамки)
-    SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+    SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
     const SDL_FRect bg = { px + 4, py + 4, pw - 8, ph - 8 };
     SDL_RenderFillRect(r, &bg);
 

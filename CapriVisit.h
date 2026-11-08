@@ -130,7 +130,7 @@ inline void Draw(SDL_Renderer* r, int w, int h, bool blocked) {
     const float capriH = std::max(90.f, std::min(200.f, fh * 0.34f));
     SDL_Texture* tex = Tutorial::PoseTexture(r, ph.pose);
     if (!tex) return;
-    const CapriData::Sprite& s = CapriData::kSprites[int(ph.pose)];
+    const CapriData::Sprite& s = Tutorial::g_sprites[int(ph.pose)];
     const float capriW = float(s.w) * capriH / float(s.h);
     const float restX = fw - capriW - 22.f;
     const float capriX = restX + (1.f - appear) * (capriW + 40.f);

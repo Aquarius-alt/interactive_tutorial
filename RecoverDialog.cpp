@@ -3,6 +3,7 @@
 #include "Text.h"
 #include "UserStore.h"
 #include "Localization.h"
+#include "Theme.h"
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -15,7 +16,7 @@ namespace {
     enum class Phase { Closed, Input, Scan, Hold, Result };
 
     // зелёный: рамка, текст и фон окна
-    const Uint8 GR = 96, GG = 228, GB = 232;
+    const Uint8 &GR = Theme::Cyan.r, &GG = Theme::Cyan.g, &GB = Theme::Cyan.b;
 
     const float kScan = 2.4f;          // минимальная длительность поиска, сек
     const float kHold = 0.35f;         // пауза на 100% перед результатом
@@ -366,7 +367,7 @@ void Recover_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     case Phase::Hold: {
         const bool hold = (g_phase == Phase::Hold);
         const bool miss = hold && g_found.empty();      // в Hold поток уже закончил
-        Uint8 R = 96, G = 228, B = 232;                  // циан кибердека
+        Uint8 R = Theme::Cyan.r, G = Theme::Cyan.g, B = Theme::Cyan.b;                  // циан кибердека
         std::string left;
         if (!hold) {
             const int dots = int(SDL_GetTicks() / 350) % 3 + 1;

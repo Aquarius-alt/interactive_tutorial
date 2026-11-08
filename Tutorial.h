@@ -88,12 +88,35 @@ inline TextButton g_btnBack{ 0, 0, 120, 34, "BACK" };
 inline TextButton g_btnSkip{ 0, 0, 120, 34, "SKIP" };
 inline bool g_showBack = false, g_showSkip = false;
 
+inline const CapriData::Sprite* g_sprites = CapriData::kSprites;   // текущий набор поз (его меняет стиль интерфейса)
+inline const char*   g_nameEn = "CAPRI";    // имя проводника в текстах (его меняет стиль интерфейса)
+inline const char*   g_nameRu = "КАПРИ";
 inline SDL_Texture*  g_tex[4] = { nullptr, nullptr, nullptr, nullptr };
 inline SDL_Renderer* g_owner = nullptr;
 
 inline Targets g_targets;   // последние известные прямоугольники (их каждый кадр задаёт main.cpp через SetTargets)
 inline void SetTargets(const Targets& t) { g_targets = t; }
+// Сменить набор спрайтов (стиль интерфейса): текстуры пересоздаются при следующем показе.
+inline void SetSprites(const CapriData::Sprite* s) {
+    g_sprites = s ? s : CapriData::kSprites;
+    for (auto& tx : g_tex) { if (tx) SDL_DestroyTexture(tx); tx = nullptr; }
+}
+inline void SetGuideName(const char* en, const char* ru) { g_nameEn = en ? en : "CAPRI"; g_nameRu = ru ? ru : "КАПРИ"; }
 inline bool Active() { return g_active; }
+
+// Подставляет имя текущего проводника вместо CAPRI / КАПРИ в тексте шагов.
+inline std::string WithGuideName(std::string s) {
+    const char* const from[2] = { "CAPRI", "КАПРИ" };
+    const char* const to[2] = { g_nameEn, g_nameRu };
+    for (int k = 0; k < 2; ++k) {
+        const std::string f = from[k], t = to[k];
+        for (size_t at = s.find(f); at != std::string::npos; at = s.find(f, at)) {
+            s.replace(at, f.size(), t);
+            at += t.size();
+        }
+    }
+    return s;
+}
 
 inline bool StepAvailable(int i, const Targets& t) {
     if (kSteps[i].target == Target::SignButtons) return t.hasSign;   // кнопок входа нет на других экранах
@@ -176,7 +199,7 @@ inline SDL_Texture* PoseTexture(SDL_Renderer* r, Pose p) {
     }
     SDL_Texture*& tex = g_tex[int(p)];
     if (tex) return tex;
-    const CapriData::Sprite& s = CapriData::kSprites[int(p)];
+    const CapriData::Sprite& s = g_sprites[int(p)];
     std::vector<Uint32> px(size_t(s.w) * size_t(s.h), 0u);
     size_t at = 0;
     for (int i = 0; i < s.runCount && at < px.size(); ++i) {
@@ -220,7 +243,7 @@ inline void DrawCapri(SDL_Renderer* r, float x, float y, float h, bool flip, flo
     const Pose shown = (glitching && sinceChange < 0.10f) ? g_prevPose : g_pose;
     SDL_Texture* tex = PoseTexture(r, shown);
     if (!tex) return;
-    const CapriData::Sprite& s = CapriData::kSprites[int(shown)];
+    const CapriData::Sprite& s = g_sprites[int(shown)];
     const float scale = h / float(s.h);
     const float w = float(s.w) * scale;
     y += std::sin(t * 2.2f) * 3.f;                        // лёгкое «дыхание»
@@ -305,12 +328,12 @@ inline void Draw(SDL_Renderer* r, int w, int h) {
     }
 
     // ---- текст реплики и размеры ----
-    const std::string title = UiText(st.titleEn, st.titleRu);
-    const std::string body = UiText(st.bodyEn, st.bodyRu);
+    const std::string title = WithGuideName(UiText(st.titleEn, st.titleRu));
+    const std::string body = WithGuideName(UiText(st.bodyEn, st.bodyRu));
     const float padIn = 16.f, btnH = 34.f;
 
     float capriH = std::max(110.f, std::min(280.f, fh * 0.40f));
-    const CapriData::Sprite& cs = CapriData::kSprites[int(g_pose)];
+    const CapriData::Sprite& cs = g_sprites[int(g_pose)];
     float capriW = float(cs.w) * capriH / float(cs.h);
     float bubbleW = std::min(480.f, fw - capriW - 18.f - 8.f - 24.f);
     const bool narrow = bubbleW < 240.f;            // совсем узкое окно: реплика во всю ширину сверху

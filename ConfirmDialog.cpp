@@ -2,13 +2,14 @@
 #include "TextButton.h"
 #include "Text.h"
 #include "Localization.h"
+#include "Theme.h"
 #include <cmath>
 #include <string>
 #include <algorithm>
 
 namespace {
     const float kPanelW = 440.f, kPanelH = 250.f;
-    const Uint8 kR = 96, kG = 228, kB = 232;
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;
 
     bool g_open = false;
     TextButton g_panel{ 0, 0, kPanelW, kPanelH, "" };   // неоновая рамка панели
@@ -102,7 +103,7 @@ namespace {
         // цветные копии (сложением цветов)
         SDL_SetTextureBlendMode(g_qmark, SDL_BLENDMODE_ADD);
         layer(255, 40, 90, 200, -split, jy);
-        layer(96, 228, 232, 200, split, -jy);
+        layer(Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 200, split, -jy);
 
         // основной знак; во время всплеска иногда мерцает
         SDL_SetTextureBlendMode(g_qmark, SDL_BLENDMODE_BLEND);
@@ -112,7 +113,7 @@ namespace {
         // полоса помех
         if (burst) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_ADD);
-            SDL_SetRenderDrawColor(r, 96, 228, 232, 120);
+            SDL_SetRenderDrawColor(r, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 120);
             const SDL_FRect bar = { x - 10, y + (Rand(step * 17) * 0.5f + 0.5f) * 16 * S, 16 * S + 20, 3 };
             SDL_RenderFillRect(r, &bar);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
@@ -141,7 +142,7 @@ void Confirm_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
     const float py = std::floor((h - kPanelH) * 0.5f);
 
     // фон панели (с отступом, чтобы не торчал за скруглёнными углами рамки)
-    SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+    SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
     const SDL_FRect bg = { px + 4, py + 4, kPanelW - 8, kPanelH - 8 };
     SDL_RenderFillRect(r, &bg);
 

@@ -5,6 +5,7 @@
 static std::vector<UndoHistory> g_answerUndo;   // история Ctrl+Z для каждого ответа
 #include "Localization.h"
 #include "Level.h"
+#include "Theme.h"
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
@@ -45,7 +46,7 @@ bool g_theoryOpen=true, g_testsOpen=true, g_answerFocus=false, g_dirty=false;
 int g_scroll=0, g_answerIndex=-1;
 std::vector<Hit> g_hits;
 TextButton g_back{20,20,110,38,"BACK"}, g_save{0,0,130,40,"SAVE"};
-const Uint8 R=96,G=228,B=232;
+const Uint8 &R=Theme::Cyan.r, &G=Theme::Cyan.g, &B=Theme::Cyan.b;
 // ---------- мини-игры ----------
 // Игра лежит в games\001_<имя>\ (main.py + manifest.json). Запуск: python main.py --data data.json --result result.json.
 // data.json приложение пишет перед запуском (то, что игра заказала в manifest "uses": tests / notes),
@@ -221,7 +222,7 @@ void DrawVerdict(SDL_Renderer*r,float cx,float cy,bool ok){
         }
     }
 }
-void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?52:26,hot?22:12,hot?30:18,255); SDL_RenderFillRect(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); SDL_RenderRect(r,&q); }
+void Rect(SDL_Renderer*r,SDL_FRect q,bool hot=false){ SDL_SetRenderDrawBlendMode(r,SDL_BLENDMODE_BLEND); SDL_SetRenderDrawColor(r,hot?Theme::PanelHi.r:Theme::Panel.r,hot?Theme::PanelHi.g:Theme::Panel.g,hot?Theme::PanelHi.b:Theme::Panel.b,255); SDL_RenderFillRect(r,&q); SDL_SetRenderDrawColor(r,R,G,B,hot?230:110); SDL_RenderRect(r,&q); }
 void AddHit(float x,float y,float w,float h,int type,int idx,int sub=-1){g_hits.push_back({{x,y,w,h},type,idx,sub});}
 bool In(const SDL_FRect&q,float x,float y){return x>=q.x&&x<=q.x+q.w&&y>=q.y&&y<=q.y+q.h;}
 
@@ -503,7 +504,8 @@ void PollGame(){
     Save();
 }
 // Доля выполнения репозитория - та же, что на шкале внизу экрана (конспекты + верные ответы + игры).
-// Репозиторий выполнен, когда шкала показывает 100%. Опыт mainXp зачисляется один раз на репозиторий.
+// Опыт идёт долями по шкале: 50% на шкале = 50% от mainXp (и от subjectXp), при следующем сохранении добавляется
+// только разница; при 100% репозиторий считается выполненным. Выданное не отнимается.
 void TryAward(){
   if(g_login.empty()||(g_mainXp<=0&&(g_subjectXp<=0||g_subjectTag.empty()))) return;
   double done=0.0; int total=0;
@@ -515,15 +517,18 @@ void TryAward(){
   for(size_t i=0;i<g_games.size();++i){
     ++total; if(i<g_gameRes.size()&&g_gameRes[i].played&&g_gameRes[i].max>0) done+=double(g_gameRes[i].score)/double(g_gameRes[i].max);
   }
-  if(total<=0||std::lround(100.0*done/double(total))<100) return;
+  if(total<=0) return;
+  const int pct=std::min(100,int(std::lround(100.0*done/double(total))));
+  if(pct<=0) return;
   std::string key=g_dir; while(!key.empty()&&(key.back()=='/'||key.back()=='\\')) key.pop_back();
   const size_t cut=key.find_last_of("/\\"); if(cut!=std::string::npos) key=key.substr(cut+1);
-  const bool gotMain=Level_AwardRepo(g_login,key,g_mainXp);
-  const bool gotSubject=Level_AwardSubject(g_login,key,g_subjectTag,g_subjectXp);
-  if(gotMain||gotSubject){
-    g_gameMsg=std::string(UiText("REPOSITORY COMPLETE!","РЕПОЗИТОРИЙ ВЫПОЛНЕН!"));
-    if(gotMain) g_gameMsg+=" +"+std::to_string(g_mainXp)+" XP";
-    if(gotSubject) g_gameMsg+=" +"+std::to_string(g_subjectXp)+" "+g_subjectTag;
+  const long long gotMain=g_mainXp>0?Level_AwardRepo(g_login,key,g_mainXp,pct):0;
+  const long long gotSubject=Level_AwardSubject(g_login,key,g_subjectTag,g_subjectXp,pct);
+  if(gotMain>0||gotSubject>0){
+    g_gameMsg=pct>=100?std::string(UiText("REPOSITORY COMPLETE!","РЕПОЗИТОРИЙ ВЫПОЛНЕН!"))
+                      :std::string(UiText("PROGRESS SAVED: ","ПРОГРЕСС СОХРАНЁН: "))+std::to_string(pct)+"%";
+    if(gotMain>0) g_gameMsg+=" +"+std::to_string(gotMain)+" XP";
+    if(gotSubject>0) g_gameMsg+=" +"+std::to_string(gotSubject)+" "+g_subjectTag;
     g_msgUntil=SDL_GetTicks()+5000;
   }
 }
@@ -706,7 +711,7 @@ void Opened_Draw(SDL_Renderer*r,int w,int h,SDL_Rect*nd,int&ndCount){
      SDL_SetRenderDrawColor(r,R,G,B,Uint8((hot?40:26)*(1.f-i/4.f)));
      const SDL_FRect gl{g_thumb.x-i,g_thumb.y-i,g_thumb.w+2.f*i,g_thumb.h+2.f*i}; SDL_RenderFillRect(r,&gl);
    }
-   SDL_SetRenderDrawColor(r,hot?200:R,hot?240:G,255,255); SDL_RenderFillRect(r,&g_thumb);
+   SDL_SetRenderDrawColor(r,hot?Theme::CyanHot.r:R,hot?Theme::CyanHot.g:G,Theme::CyanHot.b,255); SDL_RenderFillRect(r,&g_thumb);
  } else g_drag=false;
  nd[ndCount++]={20,int(viewTop),w-40,int(viewBot-viewTop)};
 

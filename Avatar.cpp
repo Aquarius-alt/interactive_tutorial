@@ -1,11 +1,12 @@
 #include "Avatar.h"
+#include "Theme.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <vector>
 
 namespace {
-    const Uint8 kR = 96, kG = 228, kB = 232;   // цвет неона, как у кнопок
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;   // цвет неона, как у кнопок
     const int   kPad = 12;                      // запас вокруг круга под свечение
     const int   kBig = 256;                     // размер сохранённого квадрата
     const int   kSmall = 80;                    // версия для маленького аватара (чтобы не мылилось)
@@ -126,7 +127,7 @@ namespace {
         }
     }
 
-    Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | (Uint32(kB) << 16) | (Uint32(kG) << 8) | kR; }
+    Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | 0x00FFFFFFu; }   // белая маска; цвет задаётся SDL_SetTextureColorMod (меняется со стилем)
 
     void FreeRings() {
         for (Ring& g : g_rings) {
@@ -225,6 +226,8 @@ void Avatar_Draw(SDL_Renderer* r, float cx, float cy, float d, bool lit) {
     // неоновый контур
     Ring& rg = GetRing(r, di);
     const SDL_FRect ring = { cx - half - kPad, cy - half - kPad, float(di + kPad * 2), float(di + kPad * 2) };
+    SDL_SetTextureColorMod(rg.glow, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
+    SDL_SetTextureColorMod(rg.core, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
     SDL_SetTextureAlphaMod(rg.glow, lit ? 255 : 190);
     SDL_RenderTexture(r, rg.glow, nullptr, &ring);
     if (lit) SDL_RenderTexture(r, rg.glow, nullptr, &ring);

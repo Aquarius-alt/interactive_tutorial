@@ -1,11 +1,12 @@
 #include "Button.h"
+#include "Theme.h"
 #include <vector>
 #include <cmath>
 #include <algorithm>
 
 namespace {
     const int   kPad = 10;                    // запас под свечение
-    const Uint8 kR = 96, kG = 228, kB = 232;  // голубой
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;  // голубой
     const float kGlowStrength = 0.30f;        // яркость свечения (0..1)
     const float kGlowFalloff = 2.6f;         // ширина свечения
     const float kAnimTime = 0.25f;        // длительность поворота, сек
@@ -13,7 +14,7 @@ namespace {
     const int   kTeeth = 8;                   // зубцов у шестерни
     const double kTurnDeg = 90.0;             // на сколько доворачивается шестерня при открытии меню
 
-    Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | (Uint32(kB) << 16) | (Uint32(kG) << 8) | kR; }
+    Uint32 Pack(Uint8 a) { return (Uint32(a) << 24) | 0x00FFFFFFu; }   // белая маска; цвет задаётся SDL_SetTextureColorMod (меняется со стилем)
 
     float Thickness(float s) { return std::max(1.5f, s * 0.08f); }
 
@@ -121,6 +122,8 @@ void MenuButton_Draw(SDL_Renderer* r, MenuButton& b) {
     const SDL_FRect dst = { cx - tw * 0.5f, cy - th * 0.5f, tw, th };
     const double angle = kTurnDeg * e;                // шестерня поворачивается при открытии / закрытии меню
 
+    SDL_SetTextureColorMod(b.glow, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
+    SDL_SetTextureColorMod(b.core, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
     SDL_SetTextureAlphaMod(b.glow, Uint8(b.hovered ? 255 : 190));
     SDL_RenderTextureRotated(r, b.glow, nullptr, &dst, angle, nullptr, SDL_FLIP_NONE);
     if (b.hovered)   // второй проход усиливает неон при наведении

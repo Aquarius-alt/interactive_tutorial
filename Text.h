@@ -4,14 +4,20 @@
 #include <cstddef>
 #include <vector>
 
+// Цвета текста по умолчанию (когда вызывающий код не передал свои). Меняются при смене стиля (Styles::Apply).
+namespace TextDefaults {
+    inline Uint8 AccentR = 96, AccentG = 228, AccentB = 232;   // = Theme::Cyan
+    inline Uint8 InkR = 200, InkG = 240, InkB = 255;           // обычный светлый текст
+}
+
 void DrawCenteredText(SDL_Renderer* r, const char* text, int w, int h,
     float scale = 3.0f, float yOffset = 0.0f,
-    Uint8 red = 96, Uint8 green = 228, Uint8 blue = 232);
+    Uint8 red = TextDefaults::AccentR, Uint8 green = TextDefaults::AccentG, Uint8 blue = TextDefaults::AccentB);
 
 // UTF-8 helpers shared by all editable text controls.
 void DrawUtf8Text(SDL_Renderer* renderer, const std::string& text,
     float x, float y, int fontHeight,
-    Uint8 red = 200, Uint8 green = 240, Uint8 blue = 255, Uint8 alpha = 255);
+    Uint8 red = TextDefaults::InkR, Uint8 green = TextDefaults::InkG, Uint8 blue = TextDefaults::InkB, Uint8 alpha = 255);
 int NormalizeTextFontHeight(int fontHeight);
 float Utf8TextWidth(const std::string& text, int fontHeight);
 size_t Utf8Count(const std::string& text);
@@ -26,7 +32,7 @@ std::string Utf8Fit(const std::string& text, float maxWidth, int fontHeight);
 // Draws text inside a box of width boxW starting at boxX: shrinks the font first, then cuts with "..".
 // centered = true centers the text in the box; y is the vertical CENTER of the line.
 void DrawUtf8TextFit(SDL_Renderer* r, const std::string& text, float boxX, float centerY, float boxW,
-    int preferredFont, bool centered, Uint8 red = 200, Uint8 green = 240, Uint8 blue = 255, Uint8 alpha = 255);
+    int preferredFont, bool centered, Uint8 red = TextDefaults::InkR, Uint8 green = TextDefaults::InkG, Uint8 blue = TextDefaults::InkB, Uint8 alpha = 255);
 
 // Clipboard paste: Ctrl+V / Cmd+V / Shift+Insert (works on any keyboard layout, e.g. Russian).
 bool IsPasteEvent(const SDL_Event& e);

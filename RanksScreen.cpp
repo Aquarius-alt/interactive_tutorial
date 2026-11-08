@@ -6,6 +6,7 @@
 #include "Localization.h"
 #include "RepoStore.h"
 #include "Level.h"
+#include "Theme.h"
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
@@ -20,7 +21,7 @@ namespace {
     // защищает, от человека с доступом к exe - нет.
     const char kCreatePassword[] = "Serebr200801";
 
-    const Uint8 kR = 96, kG = 228, kB = 232;
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;
     const float kCardW = 150.f, kCardH = 176.f;      // карточка "+", как на главном экране
     const float kPwW = 440.f, kPwH = 230.f;          // окно пароля
 
@@ -314,7 +315,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         FillR(r, cx - len * 0.5f, cy - th * 0.5f, len, th);
         FillR(r, cx - th * 0.5f, cy - len * 0.5f, th, len);
         DrawUtf8TextFit(r, UiText("CREATE TASK", "СОЗДАТЬ ЗАДАНИЕ"), g_create.x + 8.f,
-            g_create.y + kCardH - 28.f, kCardW - 16.f, 16, true, 150, 190, 215, 255);
+            g_create.y + kCardH - 28.f, kCardW - 16.f, 16, true, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
     }
 
     // карточки созданных заданий: сетка справа от "+", переносится по ширине окна
@@ -335,9 +336,9 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             const float tx = cx0 + 8.f, tw = kCardW - 16.f;
             DrawUtf8TextFit(r, t.title, tx, cy0 + 34.f, tw, 16, true, kR, kG, kB, 255);
             const std::string rank = t.rank.empty() ? std::string(UiText("NO RANK", "БЕЗ ЗВАНИЯ")) : t.rank;
-            DrawUtf8TextFit(r, rank, tx, cy0 + 84.f, tw, 16, true, 205, 255, 255, t.rank.empty() ? 110 : 255);
+            DrawUtf8TextFit(r, rank, tx, cy0 + 84.f, tw, 16, true, Theme::Ink.r, Theme::Ink.g, Theme::Ink.b, t.rank.empty() ? 110 : 255);
             if (!t.subjectTags.empty())
-                DrawUtf8TextFit(r, t.subjectTags, tx, cy0 + 122.f, tw, 16, true, 150, 190, 215, 255);
+                DrawUtf8TextFit(r, t.subjectTags, tx, cy0 + 122.f, tw, 16, true, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
             if (g_done[size_t(i)])
                 DrawUtf8TextFit(r, UiText("DONE", "ПРОЙДЕНО"), tx, cy0 + kCardH - 22.f, tw, 16, true, 120, 220, 140, 255);
             else
@@ -353,7 +354,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         SDL_RenderFillRect(r, nullptr);
 
         const float px = std::floor((float(w) - kPwW) * 0.5f), py = std::floor((float(h) - kPwH) * 0.5f);
-        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+        SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         FillR(r, px + 4.f, py + 4.f, kPwW - 8.f, kPwH - 8.f);
         g_pwPanel.x = px; g_pwPanel.y = py; g_pwPanel.hovered = false;
         TextButton_Draw(r, g_pwPanel);
@@ -392,7 +393,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         const float ix = px + pad, iw = pw - 2.f * pad;
         const float btnH = 40.f, gap = 12.f;
 
-        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+        SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         FillR(r, px + 4.f, py + 4.f, pw - 8.f, ph - 8.f);
         g_tPanel.x = px; g_tPanel.y = py; g_tPanel.w = pw; g_tPanel.h = ph; g_tPanel.hovered = false;
         TextButton_Draw(r, g_tPanel);
@@ -419,7 +420,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             g_tNext.label = last ? UiText("FINISH", "ЗАВЕРШИТЬ") : UiText("NEXT", "ДАЛЕЕ");
 
             const std::string head = std::string(UiText("QUESTION ", "ВОПРОС ")) + std::to_string(g_qi + 1) + "/" + std::to_string(g_tq.size());
-            DrawUtf8Text(r, head, ix, py + pad + 40.f, 16, 150, 190, 215, 255);
+            DrawUtf8Text(r, head, ix, py + pad + 40.f, 16, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
 
             g_tField.placeholder = UiText("ANSWER", "ОТВЕТ");
             g_tField.x = ix; g_tField.w = iw; g_tField.h = 40.f;
@@ -430,7 +431,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             const int maxLines = std::max(1, int((qBottom - qTop) / 24.f));
             const std::vector<std::string> lines = WrapText(g_tq[size_t(g_qi)].text, iw, 16, size_t(maxLines));
             for (size_t k = 0; k < lines.size(); ++k)
-                DrawUtf8Text(r, lines[k], ix, qTop + float(k) * 24.f, 16, 205, 255, 255, 255);
+                DrawUtf8Text(r, lines[k], ix, qTop + float(k) * 24.f, 16, Theme::Ink.r, Theme::Ink.g, Theme::Ink.b, 255);
 
             TextField_Draw(r, g_tField);
 
@@ -444,7 +445,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                 DrawUtf8TextFit(r, UiText("TASK COMPLETED", "ЗАДАНИЕ ПРОЙДЕНО"), ix, cy, iw, 24, true, 120, 220, 140, 255);
                 if (!g_rankLine.empty()) {
                     DrawUtf8TextFit(r, g_newRank ? UiText("RANK RECEIVED", "РАНГ ПОЛУЧЕН") : UiText("RANK ALREADY RECEIVED", "РАНГ УЖЕ ПОЛУЧЕН"),
-                        ix, cy + 44.f, iw, 16, true, 150, 190, 215, 255);
+                        ix, cy + 44.f, iw, 16, true, Theme::InkDim.r, Theme::InkDim.g, Theme::InkDim.b, 255);
                     DrawUtf8TextFit(r, g_rankLine, ix, cy + 84.f, iw, 24, true, kR, kG, kB, 255);
                 }
                 else {
@@ -459,7 +460,7 @@ void Ranks_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                         ix, cy + 44.f, iw, 16, true, 110, 140, 160, 255);
                 else
                     DrawUtf8TextFit(r, std::string(UiText("CORRECT: ", "ВЕРНО: ")) + std::to_string(g_good) + "/" + std::to_string(g_checked),
-                        ix, cy + 44.f, iw, 16, true, 205, 255, 255, 255);
+                        ix, cy + 44.f, iw, 16, true, Theme::Ink.r, Theme::Ink.g, Theme::Ink.b, 255);
             }
             TextButton_Draw(r, g_tClose);
             if (g_stage == 2 && g_checked > 0) TextButton_Draw(r, g_tRetry);

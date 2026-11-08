@@ -6,6 +6,7 @@
 #include "RepoStore.h"
 #include "Text.h"
 #include "Localization.h"
+#include "Theme.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -14,7 +15,7 @@
 #include <vector>
 
 namespace {
-    const Uint8 kR = 96, kG = 228, kB = 232;      // цвет неона, как у кнопок
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;      // цвет неона, как у кнопок
     const size_t kNameMax = 40;
     const size_t kDescMax = 500;
     const size_t kTagMax = 24;
@@ -148,7 +149,7 @@ namespace {
 
         for (size_t i = 0; i < lines.size(); ++i)
             DrawUtf8Text(r, lines[i], b.x + pad, b.y + pad + float(i) * (cs + 4.f),
-                std::max(10, static_cast<int>(8.f * scale)), 205, 255, 255, 255);
+                std::max(10, static_cast<int>(8.f * scale)), Theme::Ink.r, Theme::Ink.g, Theme::Ink.b, 255);
 
         std::string foot;
         if (g_tab == 3) {
@@ -170,7 +171,7 @@ namespace {
                 SDL_SetRenderDrawColor(r, kR, kG, kB, 45);
                 SDL_RenderFillRect(r, &d);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
             const float dot = 4.f, gap = 4.f;
             const float x0 = std::floor(d.x + (d.w - (3.f * dot + 2.f * gap)) * 0.5f);
             const float y0 = std::floor(d.y + (d.h - dot) * 0.5f);
@@ -337,7 +338,7 @@ namespace {
     void DrawPlusIcon(SDL_Renderer* r, const TextButton& b) {
         const float cx = std::floor(b.x + b.w * 0.5f), cy = std::floor(b.y + b.h * 0.5f);
         const float len = 34.f, th = 4.f;
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         for (int i = 5; i >= 1; --i) {
@@ -358,7 +359,7 @@ namespace {
     void DrawPlaceholder(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.46f;
         const float len = S * 0.30f, th = std::max(3.f, S * 0.035f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
@@ -647,7 +648,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
             g_menuRect = { mx, my, mw, mh };
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);                  // фон, чтобы текст карточек не просвечивал
+            SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);                  // фон, чтобы текст карточек не просвечивал
             SDL_RenderFillRect(r, &g_menuRect);
             SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
             SDL_RenderRect(r, &g_menuRect);
@@ -681,7 +682,7 @@ void Create_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
                 SDL_RenderFillRect(r, &gl);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
             SDL_RenderFillRect(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }

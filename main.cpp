@@ -27,6 +27,7 @@
 #include "Splash.h"
 #include "Tutorial.h"
 #include "CapriVisit.h"
+#include "Styles.h"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -47,6 +48,7 @@ static TextButton g_menuPanel{ 0, 0, 360, 230, "" };
 static TextButton g_interfaceButton{ 0, 0, 280, 48, "INTERFACE" };
 static TextButton g_tutorialButton{ 0, 0, 280, 48, "TUTORIAL" };
 static TextButton g_interfaceBackButton{ 0, 0, 110, 38, "BACK" };
+static TextButton g_styleButton{ 0, 0, 150, 42, "CAPRI" };
 static TextButton g_capriToggle{ 0, 0, 150, 42, "ON" };
 static TextButton g_lngButton{ 0, 0, 150, 42, "ENG  v" };
 static TextButton g_lngEngOption{ 0, 0, 150, 38, "ENG" };
@@ -85,8 +87,8 @@ namespace {
     ControlIconTextures g_fullscreenTextures;
 
     Uint32 PackControlPixel(Uint8 alpha) {
-        return (Uint32(alpha) << 24) | (Uint32(kControlB) << 16) |
-               (Uint32(kControlG) << 8) | Uint32(kControlR);
+        (void)kControlR; (void)kControlG; (void)kControlB;
+        return (Uint32(alpha) << 24) | 0x00FFFFFFu;   // белая маска; цвет задаётся SDL_SetTextureColorMod (меняется со стилем)
     }
 
     float DistanceToSegment(float px, float py, float x1, float y1,
@@ -185,6 +187,8 @@ namespace {
             static_cast<float>(textureSize)
         };
 
+        SDL_SetTextureColorMod(icon.glow, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
+        SDL_SetTextureColorMod(icon.core, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b);
         SDL_SetTextureAlphaMod(icon.glow, hovered ? 255 : 190);
         SDL_RenderTexture(renderer, icon.glow, nullptr, &destination);
         if (hovered) SDL_RenderTexture(renderer, icon.glow, nullptr, &destination);
@@ -289,6 +293,38 @@ static void SetCapriVisits(bool on) {
     if (output) output << (on ? "ON" : "OFF");
 }
 
+// Стиль интерфейса (CAPRI / ASTOLFO) хранится рядом с языком.
+static std::string StylePreferencePath() {
+    char* prefPath = SDL_GetPrefPath("myproject", "settings");
+    if (!prefPath) return {};
+    std::string path(prefPath);
+    SDL_free(prefPath);
+    if (path.empty()) return {};
+    return path + "style.cfg";
+}
+
+static void LoadStylePreference() {
+    int index = 0;
+    const std::string path = StylePreferencePath();
+    if (!path.empty()) {
+        std::ifstream input(path, std::ios::binary);
+        std::string v;
+        if (input && std::getline(input, v)) {
+            while (!v.empty() && (v.back() == '\r' || v.back() == '\n')) v.pop_back();
+            index = Styles::IndexById(v);
+        }
+    }
+    Styles::Apply(index);
+}
+
+static void CycleStyle() {
+    Styles::Cycle();
+    const std::string path = StylePreferencePath();
+    if (path.empty()) return;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (output) output << Styles::Current().id;
+}
+
 static const char* kVersion = "v1.0.0";
 
 // маленькая подпись внизу: справа версия (слева теперь логотип, он рисуется в Draw())
@@ -299,7 +335,7 @@ static void DrawFooter(int w, int h) {
     const float versionRight = static_cast<float>(w) - 20.f - g_menu.size - 14.f;
     DrawUtf8Text(g_renderer, kVersion,
         versionRight - Utf8TextWidth(kVersion, fontHeight),
-        y, fontHeight, 96, 228, 232, 150);
+        y, fontHeight, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 150);
 }
 
 // Окно поверх экрана (FORGOT, новая теория / тест, IMPORT / CREATE, просмотр картинки): пока оно открыто,
@@ -405,7 +441,7 @@ static void DrawScene() {
     else {
         // Компактное меню приложения и отдельная вкладка INTERFACE.
         const float panelW = 360.f;
-        const float panelH = g_menuInterfacePage ? 250.f : 240.f;
+        const float panelH = g_menuInterfacePage ? 306.f : 240.f;
         const float px = (w - panelW) * 0.5f;
         const float py = (h - panelH) * 0.5f;
         g_menuPanel.x = px + 12.f;
@@ -435,11 +471,11 @@ static void DrawScene() {
         else {
             g_interfaceBackButton.label = UiText("BACK", "НАЗАД");
             g_interfaceBackButton.x = px + 30.f;
-            g_interfaceBackButton.y = py + 184.f;
+            g_interfaceBackButton.y = py + 240.f;
             TextButton_Draw(g_renderer, g_interfaceBackButton);
 
             // Подпись настройки языка и выпадающий список.
-            DrawUtf8Text(g_renderer, UiText("LNG", "ЯЗЫК"), px + 48.f, py + 91.f, 18, 96, 228, 232, 255);
+            DrawUtf8Text(g_renderer, UiText("LNG", "ЯЗЫК"), px + 48.f, py + 91.f, 18, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 255);
             g_lngButton.x = px + 160.f;
             g_lngButton.y = py + 78.f;
             g_lngButton.label = UiRussianFlag() ? "RUS  v" : "ENG  v";
@@ -449,12 +485,20 @@ static void DrawScene() {
 
             // Капри: заглядывать раз в 30 минут или нет (при открытом списке языков строка скрыта под ним)
             if (!g_lngDropdownOpen) {
-                DrawUtf8Text(g_renderer, UiText("CAPRI", "КАПРИ"), px + 48.f, py + 143.f, 18, 96, 228, 232, 255);
+                DrawUtf8TextFit(g_renderer, UiText(Styles::Current().nameEn, Styles::Current().nameRu), px + 48.f, py + 143.f + 8.f, 106.f, 18, false, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 255);
                 g_capriToggle.x = px + 160.f;
                 g_capriToggle.y = py + 130.f;
                 g_capriToggle.label = CapriVisit::g_enabled ? UiText("ON", "ВКЛ") : UiText("OFF", "ВЫКЛ");
                 TextButton_Draw(g_renderer, g_capriToggle);
                 nd[ndCount++] = TextButton_Rect(g_capriToggle);
+
+                // Стиль интерфейса: кнопка переключает стили по кругу
+                DrawUtf8Text(g_renderer, UiText("STYLE", "СТИЛЬ"), px + 48.f, py + 195.f, 18, Theme::Cyan.r, Theme::Cyan.g, Theme::Cyan.b, 255);
+                g_styleButton.x = px + 160.f;
+                g_styleButton.y = py + 182.f;
+                g_styleButton.label = UiText(Styles::Current().nameEn, Styles::Current().nameRu);
+                TextButton_Draw(g_renderer, g_styleButton);
+                nd[ndCount++] = TextButton_Rect(g_styleButton);
             }
 
             if (g_lngDropdownOpen) {
@@ -550,6 +594,7 @@ int main(int argc, char* argv[]) {
     // Применяем сохранённый язык до первого кадра и открытия любого экрана.
     LoadLanguagePreference();
     LoadCapriPreference();
+    LoadStylePreference();   // палитра и спрайты проводника до первого кадра
 
     SDL_Window* window = SDL_CreateWindow("aquadeck", 800, 600,
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
@@ -681,6 +726,9 @@ int main(int argc, char* argv[]) {
                     }
                     else if (!g_lngDropdownOpen && TextButton_Handle(g_capriToggle, e)) {
                         SetCapriVisits(!CapriVisit::g_enabled);
+                    }
+                    else if (!g_lngDropdownOpen && TextButton_Handle(g_styleButton, e)) {
+                        CycleStyle();
                     }
                     else if (TextButton_Handle(g_lngButton, e)) {
                         g_lngDropdownOpen = !g_lngDropdownOpen;
@@ -873,6 +921,7 @@ int main(int argc, char* argv[]) {
     TextButton_Destroy(g_interfaceBackButton);
     TextButton_Destroy(g_lngButton);
     TextButton_Destroy(g_capriToggle);
+    TextButton_Destroy(g_styleButton);
     TextButton_Destroy(g_lngEngOption);
     TextButton_Destroy(g_lngRusOption);
     MenuButton_Destroy(g_menu);

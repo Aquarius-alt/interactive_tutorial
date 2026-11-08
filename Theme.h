@@ -11,14 +11,16 @@ namespace Theme {
 
 struct Rgb { Uint8 r, g, b; };
 
-constexpr Rgb Cyan{ 96, 228, 232 };      // основной цвет линий и текста
-constexpr Rgb CyanHot{ 200, 255, 255 };  // наведение / фокус
-constexpr Rgb Coral{ 214, 84, 78 };      // акцент: предупреждения, активное действие
-constexpr Rgb CoralHot{ 255, 125, 110 };
-constexpr Rgb Panel{ 26, 12, 18 };       // заливка панелей и кнопок
-constexpr Rgb PanelHi{ 46, 18, 26 };
-constexpr Rgb BgTop{ 58, 17, 24 };       // фон: сверху тёмно-красный ...
-constexpr Rgb BgBottom{ 11, 15, 25 };    // ... снизу почти чёрно-синий
+inline Rgb Cyan{ 96, 228, 232 };      // основной цвет линий и текста
+inline Rgb CyanHot{ 200, 255, 255 };  // наведение / фокус
+inline Rgb Coral{ 214, 84, 78 };      // акцент: предупреждения, активное действие
+inline Rgb CoralHot{ 255, 125, 110 };
+inline Rgb Panel{ 26, 12, 18 };       // заливка панелей и кнопок
+inline Rgb PanelHi{ 46, 18, 26 };
+inline Rgb BgTop{ 58, 17, 24 };       // фон: сверху тёмно-красный ...
+inline Rgb BgBottom{ 11, 15, 25 };    // ... снизу почти чёрно-синий
+inline Rgb Ink{ 205, 255, 255 };      // яркий основной текст (ввод, вопросы)
+inline Rgb InkDim{ 150, 190, 215 };   // второстепенный текст (подписи, заголовки блоков)
 
 inline void SetColor(SDL_Renderer* r, Rgb c, Uint8 a = 255) {
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);

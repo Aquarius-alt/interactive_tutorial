@@ -120,6 +120,46 @@ namespace {
         return false;
     }
 
+    // Сколько опыта уже начислено за репозиторий частично (до полного выполнения): файл xppart_*.dat, строки "ключ<TAB>число".
+    long long GetCredited(const std::string& path, const std::string& key) {
+        std::ifstream in(path, std::ios::binary);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            const size_t tab = line.find('\t');
+            if (tab == std::string::npos || Lower(line.substr(0, tab)) != key) continue;
+            return std::max<long long>(0, std::strtoll(line.c_str() + tab + 1, nullptr, 10));
+        }
+        return 0;
+    }
+
+    bool SetCredited(const std::string& path, const std::string& key, long long value) {
+        std::vector<std::string> keep;
+        {
+            std::ifstream in(path, std::ios::binary);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                const size_t tab = line.find('\t');
+                if (tab == std::string::npos || Lower(line.substr(0, tab)) == key) continue;
+                keep.push_back(line);
+            }
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        for (const std::string& l : keep) out << l << '\n';
+        out << key << '\t' << value << '\n';
+        out.flush();
+        return out.good();
+    }
+
+    // Сколько опыта ещё положено к выдаче: полный xp * percent / 100 минус уже выданное (не меньше нуля).
+    long long PartDelta(long long xp, int percent, long long credited) {
+        const int p = std::clamp(percent, 0, 100);
+        const long long target = p >= 100 ? xp : xp * p / 100;
+        return std::max<long long>(0, target - credited);
+    }
+
     void Claim(const std::string& path, const std::string& key) {
         std::ofstream out(path, std::ios::binary | std::ios::app);
         if (out) { out << key << '\n'; out.flush(); }
@@ -161,15 +201,22 @@ namespace {
     }
 }
 
-bool Level_AwardRepo(const std::string& login, const std::string& repoKey, long long xp) {
+long long Level_AwardRepo(const std::string& login, const std::string& repoKey, long long xp, int percent) {
     const std::string path = UserFile(login, "xpdone_");
-    if (path.empty() || repoKey.empty() || xp <= 0) return false;
+    const std::string part = UserFile(login, "xppart_");
+    if (path.empty() || part.empty() || repoKey.empty() || xp <= 0 || percent <= 0) return 0;
 
     const std::string key = Lower(repoKey);
-    if (IsClaimed(path, key)) return false;           // уже засчитан
-    if (!Level_AddXp(login, xp)) return false;
-    Claim(path, key);                                  // не записалось - редкий случай, опыт уже начислен
-    return true;
+    if (IsClaimed(path, key)) return 0;                // полностью засчитан раньше
+    const long long credited = GetCredited(part, key);
+    const long long delta = PartDelta(xp, percent, credited);
+    long long granted = 0;
+    if (delta > 0 && Level_AddXp(login, delta)) {
+        granted = delta;
+        SetCredited(part, key, credited + delta);      // не записалось - редкий случай, опыт уже начислен
+    }
+    if (percent >= 100 && (delta == 0 || granted > 0)) Claim(path, key);   // выполнен целиком: больше не начисляем
+    return granted;
 }
 
 std::vector<TagLevel> Level_GetTags(const std::string& login) {
@@ -195,25 +242,31 @@ std::vector<TagLevel> Level_GetTags(const std::string& login) {
     return tags;
 }
 
-bool Level_AwardSubject(const std::string& login, const std::string& repoKey,
-                        const std::string& tag, long long xp) {
+long long Level_AwardSubject(const std::string& login, const std::string& repoKey,
+                             const std::string& tag, long long xp, int percent) {
     const std::string path = UserFile(login, "xpdone_");
+    const std::string part = UserFile(login, "xppart_");
     const std::string clean = CleanTag(tag);
-    if (path.empty() || repoKey.empty() || SplitTags(clean).empty() || xp <= 0) return false;
+    if (path.empty() || part.empty() || repoKey.empty() || SplitTags(clean).empty() || xp <= 0 || percent <= 0) return 0;
 
     const std::string key = Lower(repoKey) + "#subject";   // отдельная отметка: не мешает основному опыту
-    if (IsClaimed(path, key)) return false;
+    if (IsClaimed(path, key)) return 0;
 
-    std::vector<TagLevel> tags = Level_GetTags(login);
-    for (const std::string& name : SplitTags(clean)) {       // каждый тег из "a; b" получает полный опыт предмета
-        bool found = false;
-        for (TagLevel& t : tags)
-            if (Lower(t.tag) == Lower(name)) { t.xp = std::min(kMaxXp, t.xp + xp); found = true; break; }
-        if (!found) tags.push_back({ name, std::min(kMaxXp, xp) });
+    const long long credited = GetCredited(part, key);
+    const long long delta = PartDelta(xp, percent, credited);
+    long long granted = 0;
+    if (delta > 0) {
+        std::vector<TagLevel> tags = Level_GetTags(login);
+        for (const std::string& name : SplitTags(clean)) {   // каждый тег из "a; b" получает свою долю опыта предмета
+            bool found = false;
+            for (TagLevel& t : tags)
+                if (Lower(t.tag) == Lower(name)) { t.xp = std::min(kMaxXp, t.xp + delta); found = true; break; }
+            if (!found) tags.push_back({ name, std::min(kMaxXp, delta) });
+        }
+        if (SaveTags(login, tags)) { granted = delta; SetCredited(part, key, credited + delta); }
     }
-    if (!SaveTags(login, tags)) return false;
-    Claim(path, key);
-    return true;
+    if (percent >= 100 && (delta == 0 || granted > 0)) Claim(path, key);
+    return granted;
 }
 
 int Level_CompletedCount(const std::string& login) {

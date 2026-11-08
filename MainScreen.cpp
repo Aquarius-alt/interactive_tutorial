@@ -12,7 +12,7 @@
 #include <cmath>
 
 namespace {
-    const Uint8 kR = 96, kG = 228, kB = 232;   // цвет неона, как у кнопок
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;   // цвет неона, как у кнопок
 
     // аватар: круг в левом верхнем углу
     const float kAvX = 20.f, kAvY = 16.f, kAvD = 40.f;
@@ -309,19 +309,19 @@ namespace {
         const int font = std::max(10, static_cast<int>(8.f * scale));
         if (maxW > 0.f) {
             DrawUtf8TextFit(r, s, cx - maxW * 0.5f, cy, maxW, font, true,
-                hovered ? 200 : kR, hovered ? 255 : kG, 255, 255);
+                hovered ? Theme::CyanHot.r : kR, hovered ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
             return;
         }
         const float width = Utf8TextWidth(s, font);
         DrawUtf8Text(r, s, cx - width * 0.5f, cy - font * 0.5f, font,
-            hovered ? 200 : kR, hovered ? 255 : kG, 255, 255);
+            hovered ? Theme::CyanHot.r : kR, hovered ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
     }
 
     // плюс из двух полос с мягким свечением; при наведении светлее
     void DrawPlus(SDL_Renderer* r, const TextButton& b) {
         const float cx = std::floor(b.x + b.w * 0.5f), cy = std::floor(b.y + b.h * 0.5f);
         const float len = 34.f, th = 4.f;
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         for (int i = 5; i >= 1; --i) {
@@ -402,7 +402,7 @@ namespace {
     void DrawImportIcon(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.5f;
         const float th = std::max(3.f, S * 0.045f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
 
@@ -422,7 +422,7 @@ namespace {
     void DrawCreateIcon(SDL_Renderer* r, const TextButton& b) {
         const float S = b.w, cx = b.x + S * 0.5f, cy = b.y + S * 0.5f;
         const float th = std::max(3.f, S * 0.045f);
-        const Uint8 R = b.hovered ? 200 : kR, G = b.hovered ? 255 : kG, B = b.hovered ? 255 : kB;
+        const Uint8 R = b.hovered ? Theme::CyanHot.r : kR, G = b.hovered ? Theme::CyanHot.g : kG, B = b.hovered ? Theme::CyanHot.b : kB;
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(r, R, G, B, 255);
 
@@ -516,14 +516,14 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
             const SDL_FRect box{ lx, cy - sq * 0.5f, boxW, sq };
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+            SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
             SDL_RenderFillRect(r, &box);
             SDL_SetRenderDrawColor(r, tr, tg, tb, 255);
             SDL_RenderRect(r, &box);
             DrawUtf8TextFit(r, lvl, lx + 2.f, cy, boxW - 4.f, lvlFont, true, tr, tg, tb, 255);
 
             const SDL_FRect bar{ bx, cy - 8.f, bw, 16.f };
-            SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+            SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
             SDL_RenderFillRect(r, &bar);
             SDL_SetRenderDrawColor(r, tr, tg, tb, 110);
             SDL_RenderRect(r, &bar);
@@ -594,7 +594,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
                 const SDL_FRect gl = { g_thumb.x - i, g_thumb.y - i, g_thumb.w + 2.f * i, g_thumb.h + 2.f * i };
                 SDL_RenderFillRect(r, &gl);
             }
-            SDL_SetRenderDrawColor(r, hot ? 200 : kR, hot ? 255 : kG, 255, 255);
+            SDL_SetRenderDrawColor(r, hot ? Theme::CyanHot.r : kR, hot ? Theme::CyanHot.g : kG, Theme::CyanHot.b, 255);
             SDL_RenderFillRect(r, &g_thumb);
             nd[ndCount++] = { int(g_track.x) - 6, int(g_track.y), int(g_track.w) + 12, int(g_track.h) };
         }
@@ -613,7 +613,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         g_cmRect = { mx, my, mw, mh };
 
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);                      // фон, чтобы карточки не просвечивали
+        SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);                      // фон, чтобы карточки не просвечивали
         SDL_RenderFillRect(r, &g_cmRect);
         SDL_SetRenderDrawColor(r, kR, kG, kB, 120);
         SDL_RenderRect(r, &g_cmRect);
@@ -640,7 +640,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
 
         // фон списка: по форме скруглённой рамки до самого края (раньше отступ в 4 px пропускал угол карточки под списком)
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+        SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         FillRounded(r, { g_panel.x + 1.f, g_panel.y + 1.f, g_panel.w - 2.f, g_panel.h - 2.f }, 9.f);
         TextButton_Draw(r, g_panel);
 
@@ -672,7 +672,7 @@ void Main_Draw(SDL_Renderer* r, int w, int h, SDL_Rect* nd, int& ndCount) {
         SDL_RenderFillRect(r, nullptr);
 
         // фон окна (с отступом, чтобы не торчал за скруглёнными углами рамки)
-        SDL_SetRenderDrawColor(r, 26, 12, 18, 255);
+        SDL_SetRenderDrawColor(r, Theme::Panel.r, Theme::Panel.g, Theme::Panel.b, 255);
         const SDL_FRect bg = { px + 4, py + 4, pw - 8, ph - 8 };
         SDL_RenderFillRect(r, &bg);
 

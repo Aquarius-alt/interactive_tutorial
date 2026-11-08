@@ -1,10 +1,11 @@
 #include "TextArea.h"
 #include "Text.h"
+#include "Theme.h"
 #include <algorithm>
 #include <vector>
 
 namespace {
-    const Uint8 kR = 96, kG = 228, kB = 232;      // цвет неона, как у кнопок
+    const Uint8 &kR = Theme::Cyan.r, &kG = Theme::Cyan.g, &kB = Theme::Cyan.b;      // цвет неона, как у кнопок
     const float kLineH = 20.f;                    // шаг строк (буквы 16 px при масштабе 2)
 
     // разбивает текст на строки шириной не больше cols символов (по возможности по словам)
@@ -52,7 +53,7 @@ void TextArea_Draw(SDL_Renderer* r, TextArea& a) {
         const size_t last = std::min(lines.size(), first + rows);
         for (size_t i = first; i < last; ++i)
             DrawUtf8Text(r, lines[i], a.x + padX, a.y + padY + static_cast<float>(i - first) * lineH,
-                fontHeight, 205, 255, 255, 255);
+                fontHeight, Theme::Ink.r, Theme::Ink.g, Theme::Ink.b, 255);
     }
 
     if (a.focused && a.scroll == 0 && (SDL_GetTicks() / 500) % 2 == 0) {
